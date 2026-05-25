@@ -1,0 +1,1324 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Dashboard de Velocidad Apache (Anónimo)</title>
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  
+  <!-- PapaParse CDN (Para procesar CSVs de Excel directamente en cliente) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+
+  <!-- SCRIPT DE DATOS Y LÓGICA (Definido antes para evitar ReferenceErrors de Alpine) -->
+  <script>
+    function appState() {
+      // Datos consolidados y estructurados de las Iteraciones 37 y 38 (Totalmente Anonimizados)
+      const defaultIteraciones = [
+        {
+          id: "i37",
+          name: "Iteración 37",
+          period: "Abril/Mayo 2026",
+          responses: [
+            { id: 1, anonymousName: "Colaborador Anónimo #1", speed: "Adecuada", factors: ["Fallas en pruebas", "Curva de aprendizaje"], observation: "NA" },
+            { id: 2, anonymousName: "Colaborador Anónimo #2", speed: "Adecuada", factors: ["Cambios de alcance", "Bloqueos técnicos", "Historias poco claras", "Dependencias externas"], observation: "Es muy importante, dado que Apache es un equipo de investigación y desarrollo, trabajar con mucho orden y no tomar decisiones apresuradas que afectan el ejercicio de prueba y error. Al atar nuestros desarrollos en etapas tempranas a otros desarrollos que están en ambiente productivo se resta la libertad necesaria para poder hacer pruebas y afinar nuestros componentes. Si bien es importante probar con cargas semejantes a las productivas, no es una buena decisión hacerlo directamente en ambiente productivo. Del afán no queda sino el cansancio." },
+            { id: 3, anonymousName: "Colaborador Anónimo #3", speed: "Alta", factors: ["Fallas de backlog", "Cambios de alcance", "Dependencias externas", "Fallas en pruebas", "Fallas en producción", "Historias poco claras"], observation: "El ritmo fue alto. Al no tener un alcance claro ni límites y con el fin de dejar un producto terminado adecuado para salir a producción, más el afán de cambiar de tema, se invirtió mucho tiempo para entregar algo estable y completo dentro del mismo tiempo. Se desarrollaron 2 servicios adicionales no planeados, más 1 artifacts, proyecto de skill y skills de utilidad. Esto es producto de la necesidad del mismo proyecto ya que sin esto no iba a ser lo mismo. Por otro lado, el proyecto de skill es algo del día a día en el trabajo de IA; se necesitaba dejar el conocimiento para la empresa de lo usado en todo el desarrollo con IA." },
+            { id: 4, anonymousName: "Colaborador Anónimo #4", speed: "Alta", factors: ["Muchas reuniones", "Curva de aprendizaje", "Cambios de alcance", "Fallas en pruebas"], observation: "Noté un buen ritmo en cuanto a los temas del modelo de datos donde se agregaron nuevas funcionalidades que sacan mayor provecho al modelo. Esto se hizo en poco tiempo; además, se generó rápidamente mucha de la documentación pendiente para entregas. Se presentaron algunos temas de bugs para el validador de HUs que retrasaron la entrega ideal de la herramienta, pero en general se pudieron trabajar y solucionar." },
+            { id: 5, anonymousName: "Colaborador Anónimo #5", speed: "Adecuada", factors: ["Ninguno"], observation: "Ninguna observación adicional." }
+          ]
+        },
+        {
+          id: "i38",
+          name: "Iteración 38",
+          period: "Mayo 2026",
+          responses: [
+            { id: 1, anonymousName: "Colaborador Anónimo #1", speed: "Alta", factors: ["Cambios de alcance", "Historias poco claras", "Dependencias externas", "Fallas en producción", "Fallas en pruebas", "Curva de aprendizaje"], observation: "NA" },
+            { id: 2, anonymousName: "Colaborador Anónimo #2", speed: "Adecuada", factors: ["Cambios de alcance", "Historias poco claras", "Fallas en pruebas", "Fallas en producción", "Curva de aprendizaje"], observation: "Na" },
+            { id: 3, anonymousName: "Colaborador Anónimo #3", speed: "Adecuada", factors: ["Cambios de alcance", "Historias poco claras", "Ausencias", "Curva de aprendizaje"], observation: "Ninguna." }
+          ]
+        }
+      ];
+
+      return {
+        // DATOS MAESTROS DE ITERACIONES (Combinando por defecto y localStorage)
+        iteracionData: [],
+        defaultIteraciones: defaultIteraciones,
+
+        // ESTADOS DE LA APP
+        selectedIteracion: 'all',
+        selectedSpeedFilter: 'all',
+        searchTerm: '',
+        activeTab: 'dashboard',
+        selectedResponse: null,
+
+        // CONTROL DE MODAL DE SUBIDA
+        showUploadModal: false,
+        newIteracionName: '',
+        newIteracionPeriod: '',
+        uploadError: '',
+        rawCSVText: '',
+        dragOver: false,
+        uploadedFileName: '',
+
+        // PROPIEDADES REACTIVAS
+        filteredResponses: [],
+        iteracionTrends: [],
+        stats: {
+          total: 0,
+          alta: 0,
+          adecuada: 0,
+          baja: 0,
+          altaPercent: 0,
+          adecuadaPercent: 0,
+          bajaPercent: 0,
+          factors: []
+        },
+
+        // MÉTRICAS DE SENTIMIENTO DE COMENTARIOS
+        commentStats: {
+          positive: 0,
+          negative: 0,
+          neutral: 0,
+          none: 0,
+          totalWithComments: 0,
+          posPercent: 0,
+          negPercent: 0,
+          neuPercent: 0
+        },
+
+        // INICIALIZACIÓN
+        init() {
+          this.loadIteraciones();
+        },
+
+        // CARGA ITERACIONES DESDE LOCAL STORAGE O CONSERVA LAS DEFAULT
+        loadIteraciones() {
+          const savedCustom = localStorage.getItem('apache_custom_iteraciones');
+          let customIteraciones = [];
+          if (savedCustom) {
+            try {
+              customIteraciones = JSON.parse(savedCustom);
+            } catch (e) {
+              console.error("Error cargando iteraciones personalizadas", e);
+            }
+          }
+          this.iteracionData = [...this.defaultIteraciones, ...customIteraciones];
+          
+          this.calculateStats();
+          this.calculateTrends();
+        },
+
+        // RESTABLECER DATOS DE FÁBRICA
+        resetToDefaults() {
+          if (confirm("¿Estás seguro de que deseas eliminar las iteraciones cargadas y regresar a los datos iniciales de Apache?")) {
+            localStorage.removeItem('apache_custom_iteraciones');
+            this.selectedIteracion = 'all';
+            this.loadIteraciones();
+          }
+        },
+
+        // ANALIZADOR DE SENTIMIENTO LIGERO EN ESPAÑOL BASADO EN PALABRAS CLAVE
+        getCommentSentiment(text) {
+          if (!text || text.trim() === "") return "none";
+          
+          const cleanText = text.toLowerCase().trim();
+          const defaultResponses = ["na", "n/a", "none", "ninguna", "ninguna.", "ninguna observación adicional.", "ninguna observación.", "sin observaciones", "ninguno"];
+          if (defaultResponses.includes(cleanText)) {
+            return "none";
+          }
+
+          // Diccionarios tácticos de palabras clave
+          const positiveWords = [
+            "bien", "correcto", "buen", "excelente", "adecuado", "éxito", "solucionar", 
+            "logró", "estables", "estabilidad", "mayor provecho", "rápido", "solucionaron", 
+            "oportuna", "concentrado", "limpio", "avanzó", "aportó", "con éxito", "estable"
+          ];
+
+          const negativeWords = [
+            "retrasaron", "afectan", "cansancio", "bugs", "afán", "apresuradas", "difícil", 
+            "problema", "fallas", "reprocesos", "ralentiza", "confusión", "demoras", "limitar", 
+            "no tener", "retraso", "impedimento", "error", "confundido", "complicaciones", 
+            "afectado", "freno", "presión", "estresar"
+          ];
+
+          let posScore = 0;
+          let negScore = 0;
+
+          positiveWords.forEach(word => {
+            if (cleanText.includes(word)) posScore++;
+          });
+
+          negativeWords.forEach(word => {
+            if (cleanText.includes(word)) negScore++;
+          });
+
+          if (posScore > negScore) return "positive";
+          if (negScore > posScore) return "negative";
+          return "neutral"; // Comentarios que tienen igual cantidad de palabras o son puramente informativos
+        },
+
+        // ABRIR EL MODAL DE CARGA CON VALORES ESTIMADOS
+        openModal() {
+          const lastIteracion = this.iteracionData[this.iteracionData.length - 1];
+          let nextNumber = 39;
+          if (lastIteracion && lastIteracion.name) {
+            const matches = lastIteracion.name.match(/\d+/);
+            if (matches) {
+              nextNumber = parseInt(matches[0]) + 1;
+            }
+          }
+          this.newIteracionName = `Iteración ${nextNumber}`;
+          
+          const meses = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
+          const date = new Date();
+          this.newIteracionPeriod = `${meses[date.getMonth()]} ${date.getFullYear()}`;
+          
+          this.uploadError = '';
+          this.rawCSVText = '';
+          this.uploadedFileName = '';
+          this.showUploadModal = true;
+        },
+
+        // DETECTAR ARCHIVO SELECCIONADO
+        handleFileSelect(event) {
+          const file = event.target.files[0];
+          if (!file) return;
+          this.processFile(file);
+        },
+
+        // DETECTAR ARCHIVO SOLTADO
+        handleFileDrop(event) {
+          this.dragOver = false;
+          const file = event.dataTransfer.files[0];
+          if (!file) return;
+          this.processFile(file);
+        },
+
+        // LEER TEXTO DEL ARCHIVO
+        processFile(file) {
+          if (!file.name.endsWith('.csv') && !file.name.endsWith('.txt')) {
+            this.uploadError = "Por favor selecciona únicamente un archivo estructurado CSV (.csv o .txt)";
+            return;
+          }
+          this.uploadedFileName = file.name;
+          this.uploadError = '';
+          
+          const reader = new FileReader();
+          reader.onload = (e) => {
+            this.rawCSVText = e.target.result;
+          };
+          reader.readAsText(file, 'UTF-8');
+        },
+
+        // PARSEAR CSV Y AGREGAR NUEVO SPRINT COMPLETAMENTE ANONIMIZADO
+        saveIteracion() {
+          if (!this.newIteracionName.trim()) {
+            this.uploadError = "Por favor escribe el nombre de la iteración.";
+            return;
+          }
+          if (!this.newIteracionPeriod.trim()) {
+            this.uploadError = "Por favor especifica el periodo de tiempo.";
+            return;
+          }
+          if (!this.rawCSVText.trim()) {
+            this.uploadError = "Por favor selecciona un archivo CSV válido.";
+            return;
+          }
+
+          try {
+            const parsed = Papa.parse(this.rawCSVText.trim(), {
+              header: true,
+              skipEmptyLines: true,
+              dynamicTyping: true
+            });
+
+            if (parsed.errors && parsed.errors.length > 0 && parsed.data.length === 0) {
+              throw new Error("El archivo CSV no está formateado de manera correcta.");
+            }
+
+            const headers = parsed.meta.fields || [];
+            
+            // Buscar cabeceras clave
+            const speedHeader = headers.find(h => h.toLowerCase().includes('velocidad') || h.toLowerCase().includes('sintió') || h.toLowerCase().includes('speed') || h.toLowerCase().includes('ritmo') || h.toLowerCase().includes('iteración'));
+            const factorsHeader = headers.find(h => h.toLowerCase().includes('factor') || h.toLowerCase().includes('afectaron') || h.toLowerCase().includes('frenos'));
+            const obsHeader = headers.find(h => h.toLowerCase().includes('observaci') || h.toLowerCase().includes('comentario') || h.toLowerCase().includes('opinión'));
+
+            if (!speedHeader) {
+              throw new Error("No se detectó la columna requerida de 'Velocidad'.");
+            }
+
+            // Mapear y ANONIMIZAR en caliente (Se ignoran/destruyen correos y nombres reales)
+            const responses = parsed.data.map((row, index) => {
+              const rawFactors = row[factorsHeader] || "Ninguno";
+              let factorsList = [];
+              if (rawFactors) {
+                factorsList = rawFactors.toString().split(/[;,]/).map(f => f.trim()).filter(f => f !== "");
+              }
+              if (factorsList.length === 0) {
+                factorsList = ["Ninguno"];
+              }
+
+              let speedValue = (row[speedHeader] || "Adecuada").toString().trim();
+              if (speedValue.toLowerCase() === "alta") speedValue = "Alta";
+              else if (speedValue.toLowerCase() === "baja" || speedValue.toLowerCase() === "baja / con retrasos") speedValue = "Baja";
+              else speedValue = "Adecuada";
+
+              // NUNCA guardamos el correo o el nombre real del row
+              return {
+                id: index + 1,
+                anonymousName: `Colaborador Anónimo #${index + 1}`, // Nombre ficticio idéntico para todos
+                speed: speedValue,
+                factors: factorsList,
+                observation: row[obsHeader] || ""
+              };
+            });
+
+            const newIteracionId = 'i' + (this.iteracionData.length + 37);
+            const newIteracionObj = {
+              id: newIteracionId,
+              name: this.newIteracionName,
+              period: this.newIteracionPeriod,
+              responses: responses
+            };
+
+            const savedCustom = localStorage.getItem('apache_custom_iteraciones');
+            let customIteraciones = [];
+            if (savedCustom) {
+              customIteraciones = JSON.parse(savedCustom);
+            }
+            customIteraciones.push(newIteracionObj);
+            
+            localStorage.setItem('apache_custom_iteraciones', JSON.stringify(customIteraciones));
+            this.loadIteraciones();
+            
+            this.selectedIteracion = newIteracionId;
+            this.calculateStats();
+            this.showUploadModal = false;
+            
+            alert(`¡Éxito! Se ha cargado la ${this.newIteracionName} de forma 100% anónima con ${responses.length} opiniones.`);
+          } catch (err) {
+            this.uploadError = `Error procesando datos: ${err.message}`;
+          }
+        },
+
+        // CÁLCULO DE TENDENCIAS POR SPRINT
+        calculateTrends() {
+          this.iteracionTrends = this.iteracionData.map(iter => {
+            const total = iter.responses.length;
+            const alta = iter.responses.filter(r => r.speed === 'Alta').length;
+            const adecuada = iter.responses.filter(r => r.speed === 'Adecuada').length;
+            const baja = iter.responses.filter(r => r.speed === 'Baja').length;
+            
+            return {
+              id: iter.id,
+              name: iter.name,
+              total: total,
+              altaPercent: Math.round((alta / total) * 100) || 0,
+              adecuadaPercent: Math.round((adecuada / total) * 100) || 0,
+              bajaPercent: Math.round((baja / total) * 100) || 0,
+              raw: { alta, adecuada, baja }
+            };
+          });
+        },
+
+        // CÁLCULO DE ESTADÍSTICAS GLOBALES
+        calculateStats() {
+          let total = 0;
+          let alta = 0;
+          let adecuada = 0;
+          let baja = 0;
+          const factorCounts = {};
+
+          this.iteracionData.forEach(iter => {
+            if (this.selectedIteracion === 'all' || this.selectedIteracion === iter.id) {
+              iter.responses.forEach(resp => {
+                total++;
+                if (resp.speed === 'Alta') alta++;
+                else if (resp.speed === 'Adecuada') adecuada++;
+                else if (resp.speed === 'Baja') baja++;
+
+                resp.factors.forEach(f => {
+                  if (f !== "Ninguno" && f !== "Ninguna" && f !== "Ningunas" && f !== "") {
+                    factorCounts[f] = (factorCounts[f] || 0) + 1;
+                  }
+                });
+              });
+            }
+          });
+
+          const sortedFactors = Object.keys(factorCounts).map(name => ({
+            name,
+            count: factorCounts[name],
+            percentage: total > 0 ? Math.round((factorCounts[name] / total) * 100) : 0
+          })).sort((a, b) => b.count - a.count);
+
+          this.stats = {
+            total,
+            alta,
+            adecuada,
+            baja,
+            altaPercent: total > 0 ? Math.round((alta / total) * 100) : 0,
+            adecuadaPercent: total > 0 ? Math.round((adecuada / total) * 100) : 0,
+            bajaPercent: total > 0 ? Math.round((baja / total) * 100) : 0,
+            factors: sortedFactors
+          };
+
+          this.fillFilteredResponses();
+        },
+
+        // FILTRADO DINÁMICO DE REPORTES Y PROCESAMIENTO DE SENTIMIENTO EN TIEMPO REAL
+        fillFilteredResponses() {
+          let result = [];
+          
+          this.iteracionData.forEach(iter => {
+            if (this.selectedIteracion === 'all' || this.selectedIteracion === iter.id) {
+              iter.responses.forEach(resp => {
+                result.push({
+                  ...resp,
+                  sprintId: iter.id,
+                  sprintName: iter.name,
+                  period: iter.period
+                });
+              });
+            }
+          });
+
+          if (this.selectedSpeedFilter !== 'all') {
+            result = result.filter(r => r.speed.toLowerCase() === this.selectedSpeedFilter.toLowerCase());
+          }
+
+          if (this.searchTerm.trim() !== '') {
+            const term = this.searchTerm.toLowerCase();
+            result = result.filter(r => 
+              r.observation.toLowerCase().includes(term) ||
+              r.factors.some(f => f.toLowerCase().includes(term))
+            );
+          }
+
+          // Procesar sentimientos sobre el subconjunto de respuestas filtrado
+          let pos = 0, neg = 0, neu = 0, none = 0;
+          result.forEach(r => {
+            r.sentiment = this.getCommentSentiment(r.observation);
+            if (r.sentiment === "positive") pos++;
+            else if (r.sentiment === "negative") neg++;
+            else if (r.sentiment === "neutral") neu++;
+            else none++;
+          });
+
+          const totalWithComments = pos + neg + neu;
+          this.commentStats = {
+            positive: pos,
+            negative: neg,
+            neutral: neu,
+            none: none,
+            totalWithComments: totalWithComments,
+            posPercent: totalWithComments > 0 ? Math.round((pos / totalWithComments) * 100) : 0,
+            negPercent: totalWithComments > 0 ? Math.round((neg / totalWithComments) * 100) : 0,
+            neuPercent: totalWithComments > 0 ? Math.round((neu / totalWithComments) * 100) : 0
+          };
+
+          this.filteredResponses = result;
+          
+          if (this.selectedResponse) {
+            const exists = this.filteredResponses.some(
+              r => r.id === this.selectedResponse.id && r.sprintId === this.selectedResponse.sprintId
+            );
+            if (!exists) {
+              this.selectedResponse = null;
+            }
+          }
+        }
+      };
+    }
+  </script>
+
+  <!-- Alpine.js CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+
+  <style>
+    /* Estilos personalizados para barras de desplazamiento */
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: #020617;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #27272a;
+      border-radius: 3px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: #ea580c;
+    }
+  </style>
+</head>
+<body class="min-h-screen bg-slate-950 text-slate-100 font-sans flex flex-col antialiased selection:bg-orange-500 selection:text-slate-900">
+
+  <!-- COMPONENTE INICIAL ALPINE.JS -->
+  <div x-data="appState()" class="flex flex-col min-h-screen">
+    
+    <!-- HEADER TÁCTICO APACHE -->
+    <header class="border-b border-slate-800/80 bg-slate-900/50 backdrop-blur-md sticky top-0 z-50 px-6 py-4">
+      <div class="max-w-7xl mx-auto flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+        
+        <div class="flex items-center gap-3">
+          <div class="h-10 w-10 rounded-lg bg-orange-500/10 border border-orange-500/30 flex items-center justify-center text-orange-400 font-black shadow-inner">
+            A
+          </div>
+          <div>
+            <div class="flex items-center gap-2">
+              <span class="text-xs font-bold tracking-widest text-orange-400 uppercase bg-orange-950/80 px-2 py-0.5 rounded border border-orange-500/20">APACHE TEAM</span>
+              <span class="text-xs text-slate-400">• Pulso de Velocidad Anónimo</span>
+            </div>
+            <h1 class="text-xl font-bold text-slate-100 tracking-tight mt-0.5">Diagnóstico Operativo de Iteraciones</h1>
+          </div>
+        </div>
+
+        <!-- Filtros Rápidos + Cargar Iteración -->
+        <div class="flex flex-wrap items-center gap-3">
+          <div class="flex items-center gap-2 bg-slate-900 border border-slate-800 rounded-lg p-1">
+            <button 
+              @click="selectedIteracion = 'all'; calculateStats();"
+              :class="selectedIteracion === 'all' ? 'bg-orange-500 text-slate-950 font-bold shadow' : 'text-slate-400 hover:text-slate-200'"
+              class="px-3 py-1.5 text-xs font-medium rounded-md transition-all"
+            >
+              Todas
+            </button>
+            <template x-for="iter in iteracionData" :key="iter.id">
+              <button
+                @click="selectedIteracion = iter.id; calculateStats();"
+                :class="selectedIteracion === iter.id ? 'bg-orange-500 text-slate-950 font-bold shadow' : 'text-slate-400 hover:text-slate-200'"
+                class="px-3 py-1.5 text-xs font-medium rounded-md transition-all"
+                x-text="iter.name"
+              ></button>
+            </template>
+          </div>
+
+          <!-- BOTÓN CARGAR CSV -->
+          <button 
+            @click="openModal()"
+            class="bg-orange-600 hover:bg-orange-500 text-slate-950 font-extrabold text-xs px-3.5 py-2.5 rounded-lg transition-all shadow-md flex items-center gap-2 border border-orange-400/30 hover:scale-105 active:scale-95"
+          >
+            <svg class="w-4 h-4 text-slate-950" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4" /></svg>
+            Cargar Iteración
+          </button>
+        </div>
+
+      </div>
+    </header>
+
+    <!-- SUB-HEADER NAV -->
+    <div class="bg-slate-900/30 border-b border-slate-800/40 px-6">
+      <div class="max-w-7xl mx-auto flex items-center justify-between">
+        <nav class="flex gap-1 py-2">
+          <button
+            @click="activeTab = 'dashboard'"
+            :class="activeTab === 'dashboard' ? 'text-orange-400 bg-slate-900/80 border-b-2 border-orange-400 rounded-b-none' : 'text-slate-400 hover:text-slate-200'"
+            class="px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2"
+          >
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" /></svg>
+            Vista General
+          </button>
+          <button
+            @click="activeTab = 'responses'"
+            :class="activeTab === 'responses' ? 'text-orange-400 bg-slate-900/80 border-b-2 border-orange-400 rounded-b-none' : 'text-slate-400 hover:text-slate-200'"
+            class="px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2"
+          >
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" /></svg>
+            Opiniones Anónimas (<span x-text="filteredResponses.length"></span>)
+          </button>
+          <button
+            @click="activeTab = 'analytics'"
+            :class="activeTab === 'analytics' ? 'text-orange-400 bg-slate-900/80 border-b-2 border-orange-400 rounded-b-none' : 'text-slate-400 hover:text-slate-200'"
+            class="px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2"
+          >
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
+            Impedimentos y Fricción
+          </button>
+        </nav>
+        
+        <div class="text-xs text-slate-500 hidden md:flex items-center gap-3">
+          <button 
+            @click="resetToDefaults()" 
+            class="text-rose-400/80 hover:text-rose-400 transition-colors flex items-center gap-1 hover:underline"
+            title="Borrar datos manuales y restaurar predeterminados"
+          >
+            <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+            Limpiar Memoria
+          </button>
+          <span class="text-slate-700">|</span>
+          <div class="flex items-center gap-1.5">
+            <svg class="w-3.5 h-3.5 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+            Estado del Anonimato: <strong class="text-emerald-400 font-extrabold uppercase">100% Protegido</strong>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- CONTENIDO PRINCIPAL -->
+    <main class="flex-1 max-w-7xl w-full mx-auto p-6 space-y-6">
+
+      <!-- EXPLICATIVO DE PRIVACIDAD -->
+      <div class="p-4 bg-gradient-to-r from-orange-950/40 via-slate-900/40 to-slate-900/30 border border-orange-500/20 rounded-xl flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div class="flex items-start gap-3">
+          <div class="p-2 bg-orange-500/10 rounded-lg text-orange-400 shrink-0 mt-0.5">
+            <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" /></svg>
+          </div>
+          <div>
+            <h4 class="text-sm font-semibold text-orange-300">Entorno de Datos Seguros y Anonimizados</h4>
+            <p class="text-xs text-slate-300 mt-0.5 max-w-3xl leading-relaxed">
+              Este dashboard ha sido configurado para el equipo **Apache** con estrictas reglas de privacidad. **No se almacenan ni se visualizan nombres, correos ni identificadores personales.** El feedback se trata como información colectiva puramente táctica para propiciar mejoras en el proceso de desarrollo y pruebas.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <!-- TAB: VISTA GENERAL -->
+      <div x-show="activeTab === 'dashboard'" class="space-y-6" x-transition>
+        
+        <!-- CARDS KPI -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          
+          <div class="bg-slate-900/60 border border-slate-800/80 rounded-xl p-5 hover:border-slate-700/80 transition-all shadow-sm">
+            <div class="flex items-center justify-between">
+              <span class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Opiniones Recibidas</span>
+              <div class="p-1.5 bg-slate-800 rounded-lg text-slate-300">
+                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" /></svg>
+              </div>
+            </div>
+            <div class="mt-3 flex items-baseline gap-2">
+              <span class="text-3xl font-extrabold text-slate-100" x-text="stats.total"></span>
+              <span class="text-xs text-orange-400 font-semibold">Reportes Anónimos</span>
+            </div>
+            <p class="text-[11px] text-slate-500 mt-1.5" x-text="'Iteraciones en dashboard: ' + iteracionData.length"></p>
+          </div>
+
+          <div class="bg-slate-900/60 border border-slate-800/80 rounded-xl p-5 hover:border-slate-700/80 transition-all shadow-sm">
+            <div class="flex items-center justify-between">
+              <span class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Sentimiento Adecuado</span>
+              <div class="p-1.5 bg-orange-500/10 rounded-lg text-orange-400">
+                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+              </div>
+            </div>
+            <div class="mt-3 flex items-baseline gap-2">
+              <span class="text-3xl font-extrabold text-orange-400" x-text="stats.adecuadaPercent + '%'"></span>
+              <span class="text-xs text-slate-400"><span x-text="stats.adecuada"></span> respuestas</span>
+            </div>
+            <p class="text-[11px] text-slate-500 mt-1.5">Velocidad estándar confortable</p>
+          </div>
+
+          <div class="bg-slate-900/60 border border-slate-800/80 rounded-xl p-5 hover:border-slate-700/80 transition-all shadow-sm">
+            <div class="flex items-center justify-between">
+              <span class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Sentimiento de Ritmo Alto</span>
+              <div class="p-1.5 bg-emerald-500/10 rounded-lg text-emerald-400">
+                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
+              </div>
+            </div>
+            <div class="mt-3 flex items-baseline gap-2">
+              <span class="text-3xl font-extrabold text-emerald-400" x-text="stats.altaPercent + '%'"></span>
+              <span class="text-xs text-slate-400"><span x-text="stats.alta"></span> respuestas</span>
+            </div>
+            <p class="text-[11px] text-emerald-500/80 mt-1.5">Foco de velocidad intensa</p>
+          </div>
+
+          <div class="bg-slate-900/60 border border-slate-800/80 rounded-xl p-5 hover:border-slate-700/80 transition-all shadow-sm">
+            <div class="flex items-center justify-between">
+              <span class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Detractor Principal</span>
+              <div class="p-1.5 bg-amber-500/10 rounded-lg text-amber-400">
+                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
+              </div>
+            </div>
+            <div class="mt-3 flex items-baseline gap-2">
+              <span class="text-base font-bold text-amber-300 truncate max-w-[190px]" x-text="stats.factors[0] ? stats.factors[0].name : 'N/A'" :title="stats.factors[0] ? stats.factors[0].name : ''"></span>
+            </div>
+            <p class="text-[11px] text-slate-500 mt-2">Mencionado en <span x-text="stats.factors[0] ? stats.factors[0].count : 0"></span> reportes</p>
+          </div>
+
+        </div>
+
+        <!-- SECCIÓN GRÁFICA COMPARATIVA -->
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          
+          <!-- HISTOGRAMA DE SENTIMIENTO POR ITERACIÓN -->
+          <div class="bg-slate-900/60 border border-slate-800/80 rounded-xl p-6 lg:col-span-2">
+            <div class="flex items-center justify-between mb-6">
+              <div>
+                <h3 class="text-base font-bold text-slate-100">Tendencia de Velocidad en Apache</h3>
+                <p class="text-xs text-slate-400">Distribución de ritmo a lo largo de las iteraciones analizadas</p>
+              </div>
+              <span class="text-[11px] font-semibold text-orange-400 bg-orange-950/40 border border-orange-500/20 px-2 py-1 rounded">Comparativa Histórica</span>
+            </div>
+
+            <!-- Barras Apiladas Dinámicas de Alpine -->
+            <div class="space-y-6">
+              <template x-for="trend in iteracionTrends" :key="trend.id">
+                <div class="space-y-2">
+                  <div class="flex items-center justify-between text-xs">
+                    <div class="flex items-center gap-2">
+                      <span class="font-bold text-slate-200" x-text="trend.name"></span>
+                      <span class="text-slate-500" x-text="'(' + trend.total + ' opiniones)'"></span>
+                    </div>
+                    <div class="flex gap-3 font-semibold text-[11px]">
+                      <span class="text-emerald-400" x-text="'Alta: ' + trend.raw.alta"></span>
+                      <span class="text-orange-300" x-text="'Adecuada: ' + trend.raw.adecuada"></span>
+                      <span class="text-rose-400" x-text="'Baja: ' + trend.raw.baja"></span>
+                    </div>
+                  </div>
+
+                  <!-- Barra Apilada Visual -->
+                  <div class="h-6 w-full rounded-lg bg-slate-800/60 overflow-hidden flex shadow-inner border border-slate-700/30">
+                    <!-- Franja Alta -->
+                    <template x-if="trend.raw.alta > 0">
+                      <div 
+                        :style="'width: ' + trend.altaPercent + '%'" 
+                        class="bg-gradient-to-r from-emerald-500 to-teal-400 h-full flex items-center justify-center text-[10px] text-emerald-950 font-black transition-all hover:opacity-90"
+                        :title="'Alta: ' + trend.altaPercent + '%'"
+                        x-text="trend.altaPercent + '%'"
+                      ></div>
+                    </template>
+                    <!-- Franja Adecuada -->
+                    <template x-if="trend.raw.adecuada > 0">
+                      <div 
+                        :style="'width: ' + trend.adecuadaPercent + '%'" 
+                        class="bg-gradient-to-r from-orange-500 to-amber-400 h-full flex items-center justify-center text-[10px] text-slate-950 font-black transition-all hover:opacity-90"
+                        :title="'Adecuada: ' + trend.adecuadaPercent + '%'"
+                        x-text="trend.adecuadaPercent + '%'"
+                      ></div>
+                    </template>
+                    <!-- Franja Baja -->
+                    <template x-if="trend.raw.baja > 0">
+                      <div 
+                        :style="'width: ' + trend.bajaPercent + '%'" 
+                        class="bg-gradient-to-r from-rose-500 to-red-400 h-full flex items-center justify-center text-[10px] text-rose-950 font-black transition-all hover:opacity-90"
+                        :title="'Baja: ' + trend.bajaPercent + '%'"
+                        x-text="trend.bajaPercent + '%'"
+                      ></div>
+                    </template>
+                  </div>
+                </div>
+              </template>
+            </div>
+
+            <div class="mt-6 pt-4 border-t border-slate-800/60 grid grid-cols-3 gap-2 text-center text-xs">
+              <div class="flex items-center justify-center gap-1.5 text-slate-400">
+                <span class="w-2.5 h-2.5 rounded-full bg-emerald-400 block"></span>
+                Alta / Ritmo Intenso
+              </div>
+              <div class="flex items-center justify-center gap-1.5 text-slate-400">
+                <span class="w-2.5 h-2.5 rounded-full bg-orange-400 block"></span>
+                Adecuada / Esperado
+              </div>
+              <div class="flex items-center justify-center gap-1.5 text-slate-400">
+                <span class="w-2.5 h-2.5 rounded-full bg-rose-400 block"></span>
+                Baja / Con Retrasos
+              </div>
+            </div>
+
+          </div>
+
+          <!-- FACTORES DE ENLENTECIMIENTO (TOP DE APACHE) -->
+          <div class="bg-slate-900/60 border border-slate-800/80 rounded-xl p-6 flex flex-col justify-between">
+            <div>
+              <h3 class="text-base font-bold text-slate-100">Frenos Detectados</h3>
+              <p class="text-xs text-slate-400 mb-4">¿Qué factores incidieron en el ritmo de investigación y entrega?</p>
+              
+              <div class="space-y-3.5">
+                <template x-for="(f, idx) in stats.factors.slice(0, 5)" :key="idx">
+                  <div class="space-y-1">
+                    <div class="flex justify-between text-xs">
+                      <span class="font-medium text-slate-300 truncate max-w-[170px]" x-text="f.name"></span>
+                      <span class="text-slate-400 font-bold" x-text="f.count + ' menciones (' + f.percentage + '%)'"></span>
+                    </div>
+                    <div class="h-1.5 w-full bg-slate-800 rounded-full overflow-hidden">
+                      <div 
+                        :style="'width: ' + f.percentage + '%'"
+                        :class="idx === 0 ? 'bg-orange-500' : (idx === 1 ? 'bg-orange-600/85' : (idx === 2 ? 'bg-orange-700/70' : 'bg-slate-600'))"
+                        class="h-full rounded-full"
+                      ></div>
+                    </div>
+                  </div>
+                </template>
+              </div>
+            </div>
+
+            <div class="mt-5 pt-4 border-t border-slate-800/60">
+              <button 
+                @click="activeTab = 'analytics'"
+                class="w-full py-2 bg-slate-800 hover:bg-slate-700/80 text-xs font-semibold text-slate-200 rounded-lg transition-colors flex items-center justify-center gap-2"
+              >
+                Análisis de Impedimentos
+                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" /></svg>
+              </button>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- COMENTARIOS CLAVE ANONIMIZADOS -->
+        <div class="bg-slate-900/40 border border-slate-800/80 rounded-xl p-6">
+          <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-4">
+            <div>
+              <h3 class="text-base font-bold text-slate-100">Declaraciones Críticas Clave (Protegidas)</h3>
+              <p class="text-xs text-slate-400">Retroalimentación valiosa y libre de rastreo de identidad</p>
+            </div>
+            <button 
+              @click="activeTab = 'responses'; searchTerm = ''; fillFilteredResponses();"
+              class="text-xs text-orange-400 hover:text-orange-300 font-medium flex items-center gap-1"
+            >
+              Ver todas las opiniones <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" /></svg>
+            </button>
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            
+            <div class="bg-slate-900/80 border border-slate-800/80 rounded-xl p-4 flex flex-col justify-between hover:border-orange-500/30 transition-all">
+              <div>
+                <div class="flex items-center justify-between mb-2">
+                  <span class="text-xs font-bold text-orange-400 bg-orange-500/10 px-2 py-0.5 rounded border border-orange-500/20">Iteración 37</span>
+                  <span class="text-[10px] text-slate-500">Colaborador Anónimo</span>
+                </div>
+                <p class="text-xs text-slate-300 italic line-clamp-4">
+                  "Es muy importante, dado que Apache es un equipo de investigación y desarrollo, trabajar con mucho orden y no tomar decisiones apresuradas que afectan el ejercicio de prueba y error. Al atar nuestros desarrollos en etapas tempranas a otros desarrollos que están en ambiente productivo se resta la libertad necesaria para poder hacer pruebas y afinar nuestros componentes..."
+                </p>
+              </div>
+              <div class="mt-4 pt-3 border-t border-slate-800/60 flex items-center justify-between text-[11px] text-slate-500">
+                <span>Investigación y Pruebas Seguras</span>
+                <span class="text-orange-400 font-semibold">Vel: Adecuada</span>
+              </div>
+            </div>
+
+            <div class="bg-slate-900/80 border border-slate-800/80 rounded-xl p-4 flex flex-col justify-between hover:border-orange-500/30 transition-all">
+              <div>
+                <div class="flex items-center justify-between mb-2">
+                  <span class="text-xs font-bold text-orange-400 bg-orange-500/10 px-2 py-0.5 rounded border border-orange-500/20">Iteración 37</span>
+                  <span class="text-[10px] text-slate-500">Colaborador Anónimo</span>
+                </div>
+                <p class="text-xs text-slate-300 italic line-clamp-4">
+                  "El ritmo fue alto. Al no tener un alcance claro ni límites y con el fin de dejar un producto terminado adecuado para salir a producción, más el afán de cambiar de tema, se invirtió mucho tiempo para entregar algo estable y completo dentro del mismo tiempo..."
+                </p>
+              </div>
+              <div class="mt-4 pt-3 border-t border-slate-800/60 flex items-center justify-between text-[11px] text-slate-500">
+                <span>Alcance No Planificado / IA</span>
+                <span class="text-emerald-400 font-semibold">Vel: Alta</span>
+              </div>
+            </div>
+
+          </div>
+        </div>
+
+      </div>
+
+      <!-- TAB: RESPUESTAS & FEEDBACK -->
+      <div x-show="activeTab === 'responses'" class="space-y-6" x-transition>
+        
+        <!-- BÚSQUEDA Y FILTRADO -->
+        <div class="bg-slate-900 border border-slate-800/80 rounded-xl p-4 flex flex-col md:flex-row gap-4 items-center justify-between">
+          <div class="relative w-full md:w-96">
+            <svg class="absolute left-3.5 top-1/2 -translate-y-1/2 w-4.5 h-4.5 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" width="18" height="18"><path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
+            <input
+              type="text"
+              placeholder="Buscar por impedimento u observación..."
+              x-model="searchTerm"
+              @input="fillFilteredResponses()"
+              class="w-full bg-slate-950 border border-orange-950/40 rounded-lg pl-10 pr-4 py-2 text-xs focus:outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500 transition-colors placeholder:text-slate-500 text-slate-200"
+            />
+          </div>
+
+          <div class="flex flex-wrap gap-3 items-center w-full md:w-auto">
+            <div class="flex items-center gap-2 bg-slate-950 px-3 py-1.5 rounded-lg border border-slate-800">
+              <svg class="w-3.5 h-3.5 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" /></svg>
+              <span class="text-xs font-semibold text-slate-400">Velocidad:</span>
+              <select
+                x-model="selectedSpeedFilter"
+                @change="fillFilteredResponses()"
+                class="bg-transparent border-none text-xs focus:outline-none text-slate-300 font-semibold cursor-pointer"
+              >
+                <option value="all" class="bg-slate-950 text-slate-300">Todas</option>
+                <option value="alta" class="bg-slate-950 text-emerald-400">Alta</option>
+                <option value="adecuada" class="bg-slate-950 text-orange-400">Adecuada</option>
+                <option value="baja" class="bg-slate-950 text-rose-400">Baja</option>
+              </select>
+            </div>
+
+            <div class="text-xs text-slate-500 font-semibold">
+              Mostrando <span x-text="filteredResponses.length"></span> de <span x-text="stats.total"></span> respuestas anónimas
+            </div>
+          </div>
+        </div>
+
+        <!-- WIDGET DE ANÁLISIS DE SENTIMIENTO BASADO EN COMENTARIOS (NUEVA MEJORA) -->
+        <div class="bg-slate-900 border border-slate-800/80 rounded-xl p-5 space-y-4">
+          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div>
+              <div class="flex items-center gap-2">
+                <span class="flex h-2 w-2 relative">
+                  <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-orange-400 opacity-75"></span>
+                  <span class="relative inline-flex rounded-full h-2 w-2 bg-orange-500"></span>
+                </span>
+                <h4 class="text-xs font-bold text-orange-400 uppercase tracking-wider">Análisis de Sentimiento de Comentarios</h4>
+              </div>
+              <p class="text-[11px] text-slate-400">Clasificación lingüística automatizada basada únicamente en el texto de las observaciones escritas por el equipo.</p>
+            </div>
+            <div class="text-right">
+              <span class="text-[10px] text-slate-400 bg-slate-950 px-2.5 py-1 rounded border border-slate-800 font-bold uppercase inline-block">
+                Evaluados: <span class="text-orange-400 font-black" x-text="commentStats.totalWithComments"></span> comentarios
+              </span>
+            </div>
+          </div>
+          
+          <!-- Tarjetas del Sentimiento -->
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            
+            <!-- Positivos -->
+            <div class="bg-slate-950 border border-slate-800/60 rounded-xl p-3.5 space-y-2 flex flex-col justify-between">
+              <div>
+                <div class="flex items-center justify-between">
+                  <span class="text-xs font-semibold text-slate-400 flex items-center gap-1.5">
+                    <span class="w-2.5 h-2.5 rounded-full bg-emerald-500 block"></span>
+                    Favorable / Positivo
+                  </span>
+                  <span class="text-xs font-black text-emerald-400" x-text="commentStats.posPercent + '%'"></span>
+                </div>
+                <div class="mt-2 flex items-baseline gap-1">
+                  <span class="text-2xl font-black text-slate-100" x-text="commentStats.positive"></span>
+                  <span class="text-[10px] text-slate-500 font-bold uppercase">Respuestas</span>
+                </div>
+              </div>
+              <div class="w-full bg-slate-900 rounded-full h-1.5 overflow-hidden mt-1">
+                <div :style="'width: ' + commentStats.posPercent + '%'" class="h-full bg-gradient-to-r from-emerald-500 to-teal-400 transition-all duration-500"></div>
+              </div>
+            </div>
+
+            <!-- Crítico/Desafíos -->
+            <div class="bg-slate-950 border border-slate-800/60 rounded-xl p-3.5 space-y-2 flex flex-col justify-between">
+              <div>
+                <div class="flex items-center justify-between">
+                  <span class="text-xs font-semibold text-slate-400 flex items-center gap-1.5">
+                    <span class="w-2.5 h-2.5 rounded-full bg-rose-500 block"></span>
+                    Crítico / Desafíos
+                  </span>
+                  <span class="text-xs font-black text-rose-400" x-text="commentStats.negPercent + '%'"></span>
+                </div>
+                <div class="mt-2 flex items-baseline gap-1">
+                  <span class="text-2xl font-black text-slate-100" x-text="commentStats.negative"></span>
+                  <span class="text-[10px] text-slate-500 font-bold uppercase">Respuestas</span>
+                </div>
+              </div>
+              <div class="w-full bg-slate-900 rounded-full h-1.5 overflow-hidden mt-1">
+                <div :style="'width: ' + commentStats.negPercent + '%'" class="h-full bg-gradient-to-r from-rose-500 to-red-400 transition-all duration-500"></div>
+              </div>
+            </div>
+
+            <!-- Neutros -->
+            <div class="bg-slate-950 border border-slate-800/60 rounded-xl p-3.5 space-y-2 flex flex-col justify-between">
+              <div>
+                <div class="flex items-center justify-between">
+                  <span class="text-xs font-semibold text-slate-400 flex items-center gap-1.5">
+                    <span class="w-2.5 h-2.5 rounded-full bg-amber-500 block"></span>
+                    Neutral / Informativo
+                  </span>
+                  <span class="text-xs font-black text-amber-400" x-text="commentStats.neuPercent + '%'"></span>
+                </div>
+                <div class="mt-2 flex items-baseline gap-1">
+                  <span class="text-2xl font-black text-slate-100" x-text="commentStats.neutral"></span>
+                  <span class="text-[10px] text-slate-500 font-bold uppercase">Respuestas</span>
+                </div>
+              </div>
+              <div class="w-full bg-slate-900 rounded-full h-1.5 overflow-hidden mt-1">
+                <div :style="'width: ' + commentStats.neuPercent + '%'" class="h-full bg-gradient-to-r from-amber-500 to-orange-400 transition-all duration-500"></div>
+              </div>
+            </div>
+
+          </div>
+
+          <!-- Insight Descriptivo Basado en Análisis -->
+          <div class="p-3 bg-slate-950 rounded-lg border border-slate-800 text-xs text-slate-400 flex items-center gap-2.5">
+            <div class="p-1.5 bg-orange-500/10 rounded-lg text-orange-400 shrink-0">
+              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+            </div>
+            <div>
+              <span>
+                Se excluyeron <strong class="text-slate-300" x-text="commentStats.none"></strong> reportes que no ingresaron comentarios válidos o usaron respuestas estándar de omisión (ej. "NA", "Ninguno").
+                <template x-if="commentStats.totalWithComments === 0">
+                  <span>No hay comentarios suficientes en los registros activos para generar un diagnóstico cualitativo.</span>
+                </template>
+                <template x-if="commentStats.negative > commentStats.positive">
+                  <span class="text-rose-300">El equipo Apache expresa mayor preocupación por el orden técnico, historias de usuario poco claras y fricciones con el ambiente productivo. Se recomienda mitigar el "afán" en etapas de pruebas tempranas.</span>
+                </template>
+                <template x-if="commentStats.positive >= commentStats.negative && commentStats.totalWithComments > 0">
+                  <span class="text-emerald-300">El equipo valora positivamente la aceleración del ritmo en los entregables de IA y el modelo de datos, considerándolo adecuado y estable a pesar de los cambios de alcance.</span>
+                </template>
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <!-- GRILLA DE RESPUESTAS -->
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          
+          <!-- TABLA -->
+          <div class="bg-slate-900/60 border border-slate-800/80 rounded-xl overflow-hidden lg:col-span-2">
+            <div class="border-b border-slate-800/80 px-4 py-3 bg-slate-900/40 flex items-center justify-between">
+              <h3 class="text-xs font-bold text-slate-300 uppercase tracking-wider">Historial de Reportes de Apache</h3>
+              <span class="text-[10px] text-slate-500">Selecciona un reporte para profundizar</span>
+            </div>
+
+            <div class="divide-y divide-slate-800/80 max-h-[600px] overflow-y-auto">
+              <div x-show="filteredResponses.length === 0" class="py-12 text-center text-slate-500 text-xs">
+                No se encontraron reportes con los criterios de búsqueda establecidos.
+              </div>
+
+              <template x-for="(r, index) in filteredResponses" :key="r.sprintId + '-' + index">
+                <div
+                  @click="selectedResponse = r"
+                  :class="selectedResponse && selectedResponse.id === r.id && selectedResponse.sprintId === r.sprintId ? 'bg-orange-950/20 border-l-4 border-orange-500' : 'border-l-4 border-transparent'"
+                  class="p-4 hover:bg-slate-800/40 cursor-pointer transition-all flex flex-col md:flex-row md:items-center justify-between gap-3"
+                >
+                  <div class="space-y-1">
+                    <div class="flex items-center gap-2">
+                      <span class="text-xs font-bold text-slate-200" x-text="r.anonymousName"></span>
+                      
+                      <!-- Badge Emocional del Comentario -->
+                      <template x-if="r.sentiment === 'positive'">
+                        <span class="text-[9px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-1.5 py-0.5 rounded font-bold uppercase">Favorable</span>
+                      </template>
+                      <template x-if="r.sentiment === 'negative'">
+                        <span class="text-[9px] bg-rose-500/10 text-rose-400 border border-rose-500/20 px-1.5 py-0.5 rounded font-bold uppercase">Crítico</span>
+                      </template>
+                      <template x-if="r.sentiment === 'neutral'">
+                        <span class="text-[9px] bg-amber-500/10 text-amber-400 border border-amber-500/20 px-1.5 py-0.5 rounded font-bold uppercase">Neutral</span>
+                      </template>
+                      <template x-if="r.sentiment === 'none'">
+                        <span class="text-[9px] bg-slate-800/60 text-slate-500 border border-slate-800 px-1.5 py-0.5 rounded font-bold uppercase">Sin Observación</span>
+                      </template>
+                    </div>
+                    
+                    <div class="flex flex-wrap gap-1.5 pt-1">
+                      <template x-for="f in r.factors" :key="f">
+                        <span 
+                          class="text-[9px] bg-slate-800/80 text-slate-400 px-1.5 py-0.5 rounded border border-slate-700/50"
+                          x-text="f"
+                        ></span>
+                      </template>
+                    </div>
+
+                    <template x-if="r.observation">
+                      <p class="text-xs text-slate-400 mt-1 line-clamp-1 italic" x-text="'&ldquo;' + r.observation + '&rdquo;'"></p>
+                    </template>
+                  </div>
+
+                  <div class="flex items-center justify-between md:justify-end gap-3 shrink-0">
+                    <div class="text-right">
+                      <span class="text-[10px] font-bold text-slate-500 block" x-text="r.sprintName"></span>
+                      <span class="text-[9px] text-slate-600 block" x-text="r.period"></span>
+                    </div>
+                    
+                    <span 
+                      :class="r.speed === 'Alta' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : (r.speed === 'Adecuada' ? 'bg-orange-500/10 text-orange-400 border border-orange-500/20' : 'bg-rose-500/10 text-rose-400 border border-rose-500/20')"
+                      class="text-[10px] font-bold px-2.5 py-1 rounded-full text-center min-w-[75px]"
+                      x-text="r.speed"
+                    ></span>
+                  </div>
+                </div>
+              </template>
+            </div>
+          </div>
+
+          <!-- PANEL DETALLE -->
+          <div class="bg-slate-900 border border-slate-800/80 rounded-xl p-5 h-fit sticky top-28">
+            <div x-show="selectedResponse !== null" class="space-y-4">
+              <div class="flex justify-between items-start">
+                <div>
+                  <span 
+                    class="text-[10px] font-bold text-orange-400 uppercase tracking-widest block bg-orange-950/50 border border-orange-500/20 px-2 py-0.5 rounded w-fit"
+                    x-text="selectedResponse ? selectedResponse.sprintName : ''"
+                  ></span>
+                  <h3 class="text-sm font-bold text-slate-100 mt-2" x-text="selectedResponse ? selectedResponse.anonymousName : ''"></h3>
+                  <p class="text-xs text-slate-500 italic">Identidad de origen anonimizada de forma segura</p>
+                </div>
+                
+                <span 
+                  :class="selectedResponse && selectedResponse.speed === 'Alta' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : (selectedResponse && selectedResponse.speed === 'Adecuada' ? 'bg-orange-500/10 text-orange-400 border border-orange-500/20' : 'bg-rose-500/10 text-rose-400 border border-rose-500/20')"
+                  class="text-xs font-bold px-3 py-1 rounded-full"
+                  x-text="selectedResponse ? 'Ritmo: ' + selectedResponse.speed : ''"
+                ></span>
+              </div>
+
+              <div class="border-t border-slate-800/80 pt-4 space-y-3">
+                <div>
+                  <span class="text-xs font-bold text-slate-400 block mb-1">Impedimentos Reportados:</span>
+                  <div class="flex flex-wrap gap-1.5">
+                    <template x-if="selectedResponse">
+                      <template x-for="f in selectedResponse.factors" :key="f">
+                        <span class="text-[10px] bg-slate-950 text-slate-300 px-2.5 py-1 rounded border border-slate-800 flex items-center gap-1.5">
+                          <span class="w-1.5 h-1.5 rounded-full bg-orange-400"></span>
+                          <span x-text="f"></span>
+                        </span>
+                      </template>
+                    </template>
+                  </div>
+                </div>
+
+                <div class="pt-2">
+                  <span class="text-xs font-bold text-slate-400 block mb-1">Cualitativo / Observación:</span>
+                  <div class="bg-slate-950 border border-slate-800 rounded-lg p-3">
+                    <template x-if="selectedResponse && selectedResponse.observation && selectedResponse.observation !== 'NA' && selectedResponse.observation !== 'Na'">
+                      <p class="text-xs text-slate-300 leading-relaxed italic" x-text="'&ldquo;' + selectedResponse.observation + '&rdquo;'"></p>
+                    </template>
+                    <template x-if="selectedResponse && (!selectedResponse.observation || selectedResponse.observation === 'NA' || selectedResponse.observation === 'Na')">
+                      <p class="text-xs text-slate-600 italic">No se registraron observaciones o detalles cualitativos en esta respuesta.</p>
+                    </template>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div x-show="selectedResponse === null" class="py-24 text-center text-slate-500 text-xs flex flex-col items-center justify-center gap-3">
+              <svg class="w-8 h-8 text-slate-600 animate-bounce" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" /></svg>
+              <span>Haz clic sobre un reporte anónimo en la lista de la izquierda para desplegar su análisis cualitativo completo.</span>
+            </div>
+          </div>
+
+        </div>
+
+      </div>
+
+      <!-- TAB: ANALYTICS -->
+      <div x-show="activeTab === 'analytics'" class="space-y-6" x-transition>
+        
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+          
+          <!-- ANÁLISIS DE FACTORES -->
+          <div class="bg-slate-900/60 border border-slate-800/80 rounded-xl p-6">
+            <h3 class="text-base font-bold text-slate-100 mb-2">Diagnóstico de Impedimentos para Apache</h3>
+            <p class="text-xs text-slate-400 mb-6">Detalle consolidado de los factores que obstaculizan la agilidad en los proyectos de I+D e IA.</p>
+
+            <div class="space-y-4">
+              
+              <div class="p-4 bg-slate-900 border border-slate-800 rounded-xl space-y-2">
+                <div class="flex items-center justify-between">
+                  <span class="text-xs font-bold text-slate-200">Cambios de Alcance</span>
+                  <span class="text-xs text-orange-400 font-bold">Frecuencia Crítica</span>
+                </div>
+                <p class="text-xs text-slate-400 leading-relaxed">
+                  Dado que Apache realiza constante investigación en nuevos paradigmas (como IA y Ciencia de Datos), se detecta un ingreso elevado de HU no planificadas o modificaciones de última hora para garantizar estabilidad en ambientes productivos.
+                </p>
+              </div>
+
+              <div class="p-4 bg-slate-900 border border-slate-800 rounded-xl space-y-2">
+                <div class="flex items-center justify-between">
+                  <span class="text-xs font-bold text-slate-200">Historias de Usuario Poco Claras</span>
+                  <span class="text-xs text-orange-400 font-bold">Alto</span>
+                </div>
+                <p class="text-xs text-slate-400 leading-relaxed">
+                  Las HU en ambientes experimentales suelen requerir un orden metodológico excepcional. Los cambios bruscos atentan contra el ciclo de "prueba y error", restando libertad en las fases iniciales.
+                </p>
+              </div>
+
+              <div class="p-4 bg-slate-900 border border-slate-800 rounded-xl space-y-2">
+                <div class="flex items-center justify-between">
+                  <span class="text-xs font-bold text-slate-200">Fallas en Pruebas / Ambiente Productivo</span>
+                  <span class="text-xs text-amber-500 font-bold">Moderado</span>
+                </div>
+                <p class="text-xs text-slate-400 leading-relaxed">
+                  Se reporta fricción al intentar vincular etapas tempranas a flujos directamente productivos. Probar en cargas productivas prematuramente disminuye la agilidad técnica de mitigación de bugs.
+                </p>
+              </div>
+
+            </div>
+          </div>
+
+          <!-- PROPUESTAS DE ESTABILIZACIÓN -->
+          <div class="bg-slate-900/60 border border-slate-800/80 rounded-xl p-6 flex flex-col justify-between">
+            <div>
+              <h3 class="text-base font-bold text-slate-100 mb-2">Recomendaciones para I+D Apache</h3>
+              <p class="text-xs text-slate-400 mb-6">Medidas para agilizar el rendimiento de investigación manteniendo la estabilidad operacional.</p>
+
+              <div class="space-y-4">
+                <div class="flex gap-3">
+                  <div class="h-6 w-6 rounded-full bg-orange-500/10 border border-orange-500/20 flex items-center justify-center text-orange-400 font-bold text-xs shrink-0">1</div>
+                  <div>
+                    <h4 class="text-xs font-bold text-slate-200">Delimitar Ambientes de Sandbox</h4>
+                    <p class="text-xs text-slate-400 mt-0.5">
+                      Evitar la vinculación directa de desarrollos tempranos de IA/Investigación a flujos productivos. Garantizar un ambiente aislado de pruebas con cargas simuladas para mayor libertad de iteración.
+                    </p>
+                  </div>
+                </div>
+
+                <div class="flex gap-3">
+                  <div class="h-6 w-6 rounded-full bg-orange-500/10 border border-orange-500/20 flex items-center justify-center text-orange-400 font-bold text-xs shrink-0">2</div>
+                  <div>
+                    <h4 class="text-xs font-bold text-slate-200">Criterios de DoR Flexibles pero Estables</h4>
+                    <p class="text-xs text-slate-400 mt-0.5">
+                      Establecer alcances realistas y acordados para cada iteración en el equipo Apache, limitando la adición de servicios no planificados a menos que sea rigurosamente necesario para el proyecto de IA.
+                    </p>
+                  </div>
+                </div>
+
+                <div class="flex gap-3">
+                  <div class="h-6 w-6 rounded-full bg-orange-500/10 border border-orange-500/20 flex items-center justify-center text-orange-400 font-bold text-xs shrink-0">3</div>
+                  <div>
+                    <h4 class="text-xs font-bold text-slate-200">Preservación del Conocimiento de IA</h4>
+                    <p class="text-xs text-slate-400 mt-0.5">
+                      Documentar metodológicamente las lecciones de los modelos de datos y bugs de validadores de HU para acelerar la curva de aprendizaje de futuros miembros del equipo.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="mt-8 pt-4 border-t border-slate-800/60 p-4 bg-slate-950 rounded-xl border border-slate-800 flex items-center justify-between">
+              <div class="flex items-center gap-2">
+                <span class="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                <span class="text-xs text-slate-400">Seguridad:</span>
+                <strong class="text-xs text-emerald-400">Datos Protegidos</strong>
+              </div>
+              <button 
+                @click="selectedIteracion = 'all'; activeTab = 'dashboard'; calculateStats();"
+                class="text-xs text-orange-400 hover:text-orange-300 font-semibold"
+              >
+                Volver al Dashboard
+              </button>
+            </div>
+
+          </div>
+
+        </div>
+
+      </div>
+
+    </main>
+
+    <!-- MODAL DE CARGA DE ARCHIVO DE SPRINT -->
+    <div 
+      x-show="showUploadModal" 
+      class="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm"
+      style="display: none;"
+      x-transition
+    >
+      <div 
+        @click.away="showUploadModal = false" 
+        class="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-lg overflow-hidden shadow-2xl"
+      >
+        <!-- Cabecera del Modal -->
+        <div class="border-b border-slate-800/80 px-6 py-4 bg-slate-950/40 flex items-center justify-between">
+          <div class="flex items-center gap-2">
+            <div class="h-2 w-2 rounded-full bg-orange-400 animate-pulse"></div>
+            <h3 class="text-sm font-bold text-slate-200 uppercase tracking-wider">Cargar Iteración (Anonimizado)</h3>
+          </div>
+          <button @click="showUploadModal = false" class="text-slate-400 hover:text-slate-200">
+            <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+          </button>
+        </div>
+
+        <!-- Cuerpo del Modal -->
+        <div class="p-6 space-y-4">
+          
+          <div class="bg-amber-950/30 border border-amber-500/20 p-3 rounded-lg text-xs text-amber-300 flex gap-2 items-start">
+            <svg class="w-5 h-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+            <span>Al cargar el CSV, el sistema procesará los datos operativos pero **eliminará de inmediato** los nombres y correos de las personas para mantener el anonimato absoluto.</span>
+          </div>
+
+          <!-- Nombre de la iteración -->
+          <div>
+            <label class="text-xs font-bold text-slate-400 block mb-1">Identificador de la Iteración:</label>
+            <input 
+              type="text" 
+              x-model="newIteracionName" 
+              placeholder="Ej. Iteración 39" 
+              class="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-orange-500"
+            />
+          </div>
+
+          <!-- Periodo -->
+          <div>
+            <label class="text-xs font-bold text-slate-400 block mb-1">Periodo:</label>
+            <input 
+              type="text" 
+              x-model="newIteracionPeriod" 
+              placeholder="Ej. Mayo 2026 (Fin)" 
+              class="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-orange-500"
+            />
+          </div>
+
+          <!-- Drag & Drop -->
+          <div>
+            <label class="text-xs font-bold text-slate-400 block mb-1">Archivo de Respuestas (CSV de Excel):</label>
+            <div 
+              @dragover.prevent="dragOver = true"
+              @dragleave.prevent="dragOver = false"
+              @drop.prevent="handleFileDrop($event)"
+              :class="dragOver ? 'border-orange-400 bg-orange-950/10' : 'border-slate-800 bg-slate-950/40 hover:border-slate-700'"
+              class="border-2 border-dashed rounded-xl p-6 text-center transition-all relative cursor-pointer"
+            >
+              <input 
+                type="file" 
+                accept=".csv,.txt" 
+                @change="handleFileSelect($event)" 
+                class="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+              />
+              
+              <div class="space-y-2 flex flex-col items-center">
+                <svg class="w-10 h-10 text-orange-400/80" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M9 13h6m-3-3v6m-9 1V4a2 2 0 012-2h6l2 2h6a2 2 0 012 2v12a2 2 0 01-2 2H5a2 2 0 01-2-2z" /></svg>
+                <div class="text-xs">
+                  <span class="text-orange-400 font-bold hover:underline">Haz clic para buscar</span> o arrastra tu archivo aquí
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Feedback de Selección -->
+          <template x-if="uploadedFileName">
+            <div class="p-3 bg-emerald-950/20 border border-emerald-500/20 rounded-lg flex items-center justify-between text-xs animate-fade-in">
+              <div class="flex items-center gap-2 text-emerald-300">
+                <svg class="w-4 h-4 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
+                <span>Archivo seleccionado: <strong x-text="uploadedFileName"></strong></span>
+              </div>
+              <button @click="uploadedFileName = ''; rawCSVText = '';" class="text-slate-400 hover:text-slate-200 text-[10px] hover:underline">Remover</button>
+            </div>
+          </template>
+
+          <!-- Error -->
+          <template x-if="uploadError">
+            <div class="p-3 bg-rose-950/40 border border-rose-500/20 text-rose-300 text-xs rounded-lg font-medium animate-fade-in" x-text="uploadError"></div>
+          </template>
+
+        </div>
+
+        <!-- Botones -->
+        <div class="border-t border-slate-800/80 px-6 py-4 bg-slate-950/40 flex justify-end gap-3">
+          <button 
+            @click="showUploadModal = false" 
+            class="px-4 py-2 text-xs font-semibold text-slate-400 hover:text-slate-200"
+          >
+            Cancelar
+          </button>
+          <button 
+            @click="saveIteracion()" 
+            class="px-5 py-2 text-xs font-bold bg-orange-600 hover:bg-orange-500 text-slate-950 rounded-lg transition-colors flex items-center gap-1.5"
+          >
+            Procesar de forma Anónima
+          </button>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- FOOTER -->
+    <footer class="border-t border-slate-900 bg-slate-950 py-6 px-6 mt-auto">
+      <div class="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-slate-500">
+        <div>
+          <span>© 2026 Apache Velocity Pulse Tracker - Entorno Privado de I+D.</span>
+        </div>
+        <div class="flex gap-4">
+          <span class="hover:text-slate-400 cursor-pointer">Seguridad</span>
+          <span>•</span>
+          <span class="hover:text-slate-400 cursor-pointer">Investigación Ágiles</span>
+        </div>
+      </div>
+    </footer>
+
+  </div>
+</body>
+</html>
