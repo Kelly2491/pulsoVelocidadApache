@@ -40,7 +40,7 @@
       ];
 
       return {
-        // DATOS MAESTROS DE ITERACIONES (Combinando por defecto y localStorage)
+        // DATOS MAESTROS DE ITERACIONES
         iteracionData: [],
         defaultIteraciones: defaultIteraciones,
 
@@ -50,6 +50,10 @@
         searchTerm: '',
         activeTab: 'dashboard',
         selectedResponse: null,
+
+        // DIAGNÓSTICO EJECUTIVO DE SALUD
+        pulseSummary: '',
+        pulseStatus: { color: '', bg: '', border: '', title: '', icon: '' },
 
         // CONTROL DE MODAL DE SUBIDA
         showUploadModal: false,
@@ -91,7 +95,7 @@
           this.loadIteraciones();
         },
 
-        // CARGA ITERACIONES DESDE LOCAL STORAGE O CONSERVA LAS DEFAULT
+        // CARGA ITERACIONES DESDE LOCAL STORAGE
         loadIteraciones() {
           const savedCustom = localStorage.getItem('apache_custom_iteraciones');
           let customIteraciones = [];
@@ -99,7 +103,7 @@
             try {
               customIteraciones = JSON.parse(savedCustom);
             } catch (e) {
-              console.error("Error cargando iteraciones personalizadas", e);
+              console.error("Error cargando iteraciones", e);
             }
           }
           this.iteracionData = [...this.defaultIteraciones, ...customIteraciones];
@@ -117,55 +121,32 @@
           }
         },
 
-        // ANALIZADOR DE SENTIMIENTO LIGERO EN ESPAÑOL BASADO EN PALABRAS CLAVE
+        // ANALIZADOR DE SENTIMIENTO LIGERO
         getCommentSentiment(text) {
           if (!text || text.trim() === "") return "none";
           
           const cleanText = text.toLowerCase().trim();
           const defaultResponses = ["na", "n/a", "none", "ninguna", "ninguna.", "ninguna observación adicional.", "ninguna observación.", "sin observaciones", "ninguno"];
-          if (defaultResponses.includes(cleanText)) {
-            return "none";
-          }
+          if (defaultResponses.includes(cleanText)) return "none";
 
-          // Diccionarios tácticos de palabras clave
-          const positiveWords = [
-            "bien", "correcto", "buen", "excelente", "adecuado", "éxito", "solucionar", 
-            "logró", "estables", "estabilidad", "mayor provecho", "rápido", "solucionaron", 
-            "oportuna", "concentrado", "limpio", "avanzó", "aportó", "con éxito", "estable"
-          ];
+          const positiveWords = ["bien", "correcto", "buen", "excelente", "adecuado", "éxito", "solucionar", "logró", "estables", "estabilidad", "mayor provecho", "rápido", "solucionaron", "oportuna", "concentrado", "limpio", "avanzó", "aportó", "con éxito", "estable"];
+          const negativeWords = ["retrasaron", "afectan", "cansancio", "bugs", "afán", "apresuradas", "difícil", "problema", "fallas", "reprocesos", "ralentiza", "confusión", "demoras", "limitar", "no tener", "retraso", "impedimento", "error", "confundido", "complicaciones", "afectado", "freno", "presión", "estresar"];
 
-          const negativeWords = [
-            "retrasaron", "afectan", "cansancio", "bugs", "afán", "apresuradas", "difícil", 
-            "problema", "fallas", "reprocesos", "ralentiza", "confusión", "demoras", "limitar", 
-            "no tener", "retraso", "impedimento", "error", "confundido", "complicaciones", 
-            "afectado", "freno", "presión", "estresar"
-          ];
-
-          let posScore = 0;
-          let negScore = 0;
-
-          positiveWords.forEach(word => {
-            if (cleanText.includes(word)) posScore++;
-          });
-
-          negativeWords.forEach(word => {
-            if (cleanText.includes(word)) negScore++;
-          });
+          let posScore = 0; let negScore = 0;
+          positiveWords.forEach(word => { if (cleanText.includes(word)) posScore++; });
+          negativeWords.forEach(word => { if (cleanText.includes(word)) negScore++; });
 
           if (posScore > negScore) return "positive";
           if (negScore > posScore) return "negative";
-          return "neutral"; // Comentarios que tienen igual cantidad de palabras o son puramente informativos
+          return "neutral"; 
         },
 
-        // ABRIR EL MODAL DE CARGA CON VALORES ESTIMADOS
         openModal() {
           const lastIteracion = this.iteracionData[this.iteracionData.length - 1];
           let nextNumber = 39;
           if (lastIteracion && lastIteracion.name) {
             const matches = lastIteracion.name.match(/\d+/);
-            if (matches) {
-              nextNumber = parseInt(matches[0]) + 1;
-            }
+            if (matches) nextNumber = parseInt(matches[0]) + 1;
           }
           this.newIteracionName = `Iteración ${nextNumber}`;
           
@@ -173,20 +154,16 @@
           const date = new Date();
           this.newIteracionPeriod = `${meses[date.getMonth()]} ${date.getFullYear()}`;
           
-          this.uploadError = '';
-          this.rawCSVText = '';
-          this.uploadedFileName = '';
+          this.uploadError = ''; this.rawCSVText = ''; this.uploadedFileName = '';
           this.showUploadModal = true;
         },
 
-        // DETECTAR ARCHIVO SELECCIONADO
         handleFileSelect(event) {
           const file = event.target.files[0];
           if (!file) return;
           this.processFile(file);
         },
 
-        // DETECTAR ARCHIVO SOLTADO
         handleFileDrop(event) {
           this.dragOver = false;
           const file = event.dataTransfer.files[0];
@@ -194,7 +171,6 @@
           this.processFile(file);
         },
 
-        // LEER TEXTO DEL ARCHIVO
         processFile(file) {
           if (!file.name.endsWith('.csv') && !file.name.endsWith('.txt')) {
             this.uploadError = "Por favor selecciona únicamente un archivo estructurado CSV (.csv o .txt)";
@@ -204,69 +180,38 @@
           this.uploadError = '';
           
           const reader = new FileReader();
-          reader.onload = (e) => {
-            this.rawCSVText = e.target.result;
-          };
+          reader.onload = (e) => { this.rawCSVText = e.target.result; };
           reader.readAsText(file, 'UTF-8');
         },
 
-        // PARSEAR CSV Y AGREGAR NUEVO SPRINT COMPLETAMENTE ANONIMIZADO
         saveIteracion() {
-          if (!this.newIteracionName.trim()) {
-            this.uploadError = "Por favor escribe el nombre de la iteración.";
-            return;
-          }
-          if (!this.newIteracionPeriod.trim()) {
-            this.uploadError = "Por favor especifica el periodo de tiempo.";
-            return;
-          }
-          if (!this.rawCSVText.trim()) {
-            this.uploadError = "Por favor selecciona un archivo CSV válido.";
-            return;
-          }
+          if (!this.newIteracionName.trim()) { this.uploadError = "Por favor escribe el nombre de la iteración."; return; }
+          if (!this.newIteracionPeriod.trim()) { this.uploadError = "Por favor especifica el periodo de tiempo."; return; }
+          if (!this.rawCSVText.trim()) { this.uploadError = "Por favor selecciona un archivo CSV válido."; return; }
 
           try {
-            const parsed = Papa.parse(this.rawCSVText.trim(), {
-              header: true,
-              skipEmptyLines: true,
-              dynamicTyping: true
-            });
-
-            if (parsed.errors && parsed.errors.length > 0 && parsed.data.length === 0) {
-              throw new Error("El archivo CSV no está formateado de manera correcta.");
-            }
+            const parsed = Papa.parse(this.rawCSVText.trim(), { header: true, skipEmptyLines: true, dynamicTyping: true });
+            if (parsed.errors && parsed.errors.length > 0 && parsed.data.length === 0) throw new Error("El archivo CSV no está formateado de manera correcta.");
 
             const headers = parsed.meta.fields || [];
-            
-            // Buscar cabeceras clave
             const speedHeader = headers.find(h => h.toLowerCase().includes('velocidad') || h.toLowerCase().includes('sintió') || h.toLowerCase().includes('speed') || h.toLowerCase().includes('ritmo') || h.toLowerCase().includes('iteración'));
             const factorsHeader = headers.find(h => h.toLowerCase().includes('factor') || h.toLowerCase().includes('afectaron') || h.toLowerCase().includes('frenos'));
             const obsHeader = headers.find(h => h.toLowerCase().includes('observaci') || h.toLowerCase().includes('comentario') || h.toLowerCase().includes('opinión'));
 
-            if (!speedHeader) {
-              throw new Error("No se detectó la columna requerida de 'Velocidad'.");
-            }
+            if (!speedHeader) throw new Error("No se detectó la columna requerida de 'Velocidad'.");
 
-            // Mapear y ANONIMIZAR en caliente (Se ignoran/destruyen correos y nombres reales)
             const responses = parsed.data.map((row, index) => {
               const rawFactors = row[factorsHeader] || "Ninguno";
-              let factorsList = [];
-              if (rawFactors) {
-                factorsList = rawFactors.toString().split(/[;,]/).map(f => f.trim()).filter(f => f !== "");
-              }
-              if (factorsList.length === 0) {
-                factorsList = ["Ninguno"];
-              }
-
+              let factorsList = rawFactors ? rawFactors.toString().split(/[;,]/).map(f => f.trim()).filter(f => f !== "") : ["Ninguno"];
+              
               let speedValue = (row[speedHeader] || "Adecuada").toString().trim();
               if (speedValue.toLowerCase() === "alta") speedValue = "Alta";
               else if (speedValue.toLowerCase() === "baja" || speedValue.toLowerCase() === "baja / con retrasos") speedValue = "Baja";
               else speedValue = "Adecuada";
 
-              // NUNCA guardamos el correo o el nombre real del row
               return {
                 id: index + 1,
-                anonymousName: `Colaborador Anónimo #${index + 1}`, // Nombre ficticio idéntico para todos
+                anonymousName: `Colaborador Anónimo #${index + 1}`, 
                 speed: speedValue,
                 factors: factorsList,
                 observation: row[obsHeader] || ""
@@ -274,18 +219,10 @@
             });
 
             const newIteracionId = 'i' + (this.iteracionData.length + 37);
-            const newIteracionObj = {
-              id: newIteracionId,
-              name: this.newIteracionName,
-              period: this.newIteracionPeriod,
-              responses: responses
-            };
+            const newIteracionObj = { id: newIteracionId, name: this.newIteracionName, period: this.newIteracionPeriod, responses: responses };
 
             const savedCustom = localStorage.getItem('apache_custom_iteraciones');
-            let customIteraciones = [];
-            if (savedCustom) {
-              customIteraciones = JSON.parse(savedCustom);
-            }
+            let customIteraciones = savedCustom ? JSON.parse(savedCustom) : [];
             customIteraciones.push(newIteracionObj);
             
             localStorage.setItem('apache_custom_iteraciones', JSON.stringify(customIteraciones));
@@ -295,13 +232,12 @@
             this.calculateStats();
             this.showUploadModal = false;
             
-            alert(`¡Éxito! Se ha cargado la ${this.newIteracionName} de forma 100% anónima con ${responses.length} opiniones.`);
+            alert(`¡Éxito! Se ha cargado la ${this.newIteracionName} de forma 100% anónima.`);
           } catch (err) {
             this.uploadError = `Error procesando datos: ${err.message}`;
           }
         },
 
-        // CÁLCULO DE TENDENCIAS POR SPRINT
         calculateTrends() {
           this.iteracionTrends = this.iteracionData.map(iter => {
             const total = iter.responses.length;
@@ -310,9 +246,7 @@
             const baja = iter.responses.filter(r => r.speed === 'Baja').length;
             
             return {
-              id: iter.id,
-              name: iter.name,
-              total: total,
+              id: iter.id, name: iter.name, total: total,
               altaPercent: Math.round((alta / total) * 100) || 0,
               adecuadaPercent: Math.round((adecuada / total) * 100) || 0,
               bajaPercent: Math.round((baja / total) * 100) || 0,
@@ -321,12 +255,8 @@
           });
         },
 
-        // CÁLCULO DE ESTADÍSTICAS GLOBALES
         calculateStats() {
-          let total = 0;
-          let alta = 0;
-          let adecuada = 0;
-          let baja = 0;
+          let total = 0; let alta = 0; let adecuada = 0; let baja = 0;
           const factorCounts = {};
 
           this.iteracionData.forEach(iter => {
@@ -347,16 +277,12 @@
           });
 
           const sortedFactors = Object.keys(factorCounts).map(name => ({
-            name,
-            count: factorCounts[name],
+            name, count: factorCounts[name],
             percentage: total > 0 ? Math.round((factorCounts[name] / total) * 100) : 0
           })).sort((a, b) => b.count - a.count);
 
           this.stats = {
-            total,
-            alta,
-            adecuada,
-            baja,
+            total, alta, adecuada, baja,
             altaPercent: total > 0 ? Math.round((alta / total) * 100) : 0,
             adecuadaPercent: total > 0 ? Math.round((adecuada / total) * 100) : 0,
             bajaPercent: total > 0 ? Math.round((baja / total) * 100) : 0,
@@ -366,36 +292,24 @@
           this.fillFilteredResponses();
         },
 
-        // FILTRADO DINÁMICO DE REPORTES Y PROCESAMIENTO DE SENTIMIENTO EN TIEMPO REAL
         fillFilteredResponses() {
           let result = [];
           
           this.iteracionData.forEach(iter => {
             if (this.selectedIteracion === 'all' || this.selectedIteracion === iter.id) {
               iter.responses.forEach(resp => {
-                result.push({
-                  ...resp,
-                  sprintId: iter.id,
-                  sprintName: iter.name,
-                  period: iter.period
-                });
+                result.push({ ...resp, sprintId: iter.id, sprintName: iter.name, period: iter.period });
               });
             }
           });
 
-          if (this.selectedSpeedFilter !== 'all') {
-            result = result.filter(r => r.speed.toLowerCase() === this.selectedSpeedFilter.toLowerCase());
-          }
+          if (this.selectedSpeedFilter !== 'all') result = result.filter(r => r.speed.toLowerCase() === this.selectedSpeedFilter.toLowerCase());
 
           if (this.searchTerm.trim() !== '') {
             const term = this.searchTerm.toLowerCase();
-            result = result.filter(r => 
-              r.observation.toLowerCase().includes(term) ||
-              r.factors.some(f => f.toLowerCase().includes(term))
-            );
+            result = result.filter(r => r.observation.toLowerCase().includes(term) || r.factors.some(f => f.toLowerCase().includes(term)));
           }
 
-          // Procesar sentimientos sobre el subconjunto de respuestas filtrado
           let pos = 0, neg = 0, neu = 0, none = 0;
           result.forEach(r => {
             r.sentiment = this.getCommentSentiment(r.observation);
@@ -407,10 +321,7 @@
 
           const totalWithComments = pos + neg + neu;
           this.commentStats = {
-            positive: pos,
-            negative: neg,
-            neutral: neu,
-            none: none,
+            positive: pos, negative: neg, neutral: neu, none: none,
             totalWithComments: totalWithComments,
             posPercent: totalWithComments > 0 ? Math.round((pos / totalWithComments) * 100) : 0,
             negPercent: totalWithComments > 0 ? Math.round((neg / totalWithComments) * 100) : 0,
@@ -420,12 +331,94 @@
           this.filteredResponses = result;
           
           if (this.selectedResponse) {
-            const exists = this.filteredResponses.some(
-              r => r.id === this.selectedResponse.id && r.sprintId === this.selectedResponse.sprintId
-            );
-            if (!exists) {
-              this.selectedResponse = null;
+            const exists = this.filteredResponses.some(r => r.id === this.selectedResponse.id && r.sprintId === this.selectedResponse.sprintId);
+            if (!exists) this.selectedResponse = null;
+          }
+
+          // Se actualiza el resumen ejecutivo del pulso del equipo cada vez que cambian los datos visibles
+          this.generatePulseSummary();
+        },
+
+        // --- NUEVA LÓGICA: GENERACIÓN DEL DIAGNÓSTICO EJECUTIVO ---
+        generatePulseSummary() {
+          if (this.filteredResponses.length === 0) {
+            this.pulseStatus = { color: 'text-slate-500', bg: 'bg-slate-900/40', border: 'border-slate-800', title: 'Sin Datos Visibles', icon: 'info' };
+            this.pulseSummary = "Ajusta los filtros o selecciona una iteración válida para generar un diagnóstico de la salud del equipo.";
+            return;
+          }
+
+          let summary = "";
+          let isRisk = false;
+          let isWarning = false;
+          
+          const currentTotal = this.filteredResponses.length;
+          const currentAlta = this.filteredResponses.filter(r => r.speed === 'Alta').length;
+          const currentAdecuada = this.filteredResponses.filter(r => r.speed === 'Adecuada').length;
+          const currentBaja = this.filteredResponses.filter(r => r.speed === 'Baja').length;
+          
+          const pBaja = Math.round((currentBaja / currentTotal) * 100);
+          const pAlta = Math.round((currentAlta / currentTotal) * 100);
+          const pAdecuada = Math.round((currentAdecuada / currentTotal) * 100);
+          const goodSpeed = pAlta + pAdecuada;
+
+          // Análisis de Velocidad
+          if (pBaja >= 30) {
+            isRisk = true;
+            summary += `🚨 ALERTA DE FLUJO: Un crítico ${pBaja}% de los reportes refleja retrasos operativos severos. `;
+          } else if (pAlta >= 50) {
+            isWarning = true;
+            summary += `⚡ RITMO ACELERADO: El ${pAlta}% percibe una velocidad alta o sobrecarga de tareas. Vigilar posibles signos tempranos de desgaste. `;
+          } else if (goodSpeed >= 70) {
+            summary += `✅ ESTABILIDAD: El ${goodSpeed}% mantiene un ritmo operacional adecuado o ágil, indicando un flujo sostenible. `;
+          } else {
+            summary += `⚠️ RITMO MIXTO: Existen percepciones altamente divididas sobre la velocidad de entrega actual en el equipo. `;
+          }
+
+          // Análisis Táctico de Factores
+          const currentFactorCounts = {};
+          this.filteredResponses.forEach(r => {
+            r.factors.forEach(f => {
+              if (f !== "Ninguno" && f !== "Ninguna" && f !== "Ningunas" && f !== "") {
+                currentFactorCounts[f] = (currentFactorCounts[f] || 0) + 1;
+              }
+            });
+          });
+          const sortedFactors = Object.keys(currentFactorCounts).map(name => ({ name, count: currentFactorCounts[name] })).sort((a, b) => b.count - a.count);
+
+          if (sortedFactors.length > 0) {
+            const topFactor = sortedFactors[0].name;
+            const topFactorP = Math.round((sortedFactors[0].count / currentTotal) * 100);
+            summary += `El mayor bloqueador es "${topFactor}" (presente en el ${topFactorP}% de los reportes). `;
+            
+            const lowerFactor = topFactor.toLowerCase();
+            if (lowerFactor.includes('alcance') || lowerFactor.includes('historias')) {
+              summary += "👉 Sugerencia Táctica: Exigir mayor rigor en la 'Definition of Ready' (DoR) y bloquear formalmente ingresos no planificados en medio del Sprint.";
+            } else if (lowerFactor.includes('pruebas') || lowerFactor.includes('producción')) {
+              summary += "👉 Sugerencia Táctica: Desvincular de inmediato las pruebas tempranas de la infraestructura productiva; habilitar Sandbox dedicados.";
+            } else if (lowerFactor.includes('dependencias') || lowerFactor.includes('bloqueos')) {
+               summary += "👉 Sugerencia Táctica: Anticipar refinamientos técnicos inter-equipos y no iniciar HUs sin compromisos externos asegurados.";
+            } else if (lowerFactor.includes('curva') || lowerFactor.includes('conocimiento')) {
+               summary += "👉 Sugerencia Táctica: Asignar espacios de 'Pair Programming' e invertir 10% del tiempo de equipo en documentación técnica de IA.";
             }
+          }
+
+          // Análisis de Contexto Cualitativo (Sentimiento)
+          if (this.commentStats.totalWithComments > 0) {
+             if (this.commentStats.negative > this.commentStats.positive) {
+                summary += " Las métricas textuales muestran frustración operativa real en el equipo.";
+                if (!isRisk && pBaja > 15) { isWarning = true; } // Eleva a precaución si hay frustración latente
+             }
+          }
+
+          this.pulseSummary = summary;
+
+          // Asignación Visual Definitiva del Widget
+          if (isRisk) {
+            this.pulseStatus = { color: 'text-rose-400', bg: 'bg-rose-950/40', border: 'border-rose-500/30', title: 'Salud en Riesgo: Intervención Táctica Requerida', icon: 'risk' };
+          } else if (isWarning) {
+            this.pulseStatus = { color: 'text-amber-400', bg: 'bg-amber-950/40', border: 'border-amber-500/30', title: 'Atención: Variables Operativas en Tensión', icon: 'warning' };
+          } else {
+            this.pulseStatus = { color: 'text-emerald-400', bg: 'bg-emerald-950/40', border: 'border-emerald-500/30', title: 'Salud Óptima: Ritmo y Moral Estables', icon: 'optimal' };
           }
         }
       };
@@ -437,20 +430,10 @@
 
   <style>
     /* Estilos personalizados para barras de desplazamiento */
-    ::-webkit-scrollbar {
-      width: 6px;
-      height: 6px;
-    }
-    ::-webkit-scrollbar-track {
-      background: #020617;
-    }
-    ::-webkit-scrollbar-thumb {
-      background: #27272a;
-      border-radius: 3px;
-    }
-    ::-webkit-scrollbar-thumb:hover {
-      background: #ea580c;
-    }
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: #020617; }
+    ::-webkit-scrollbar-thumb { background: #27272a; border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: #ea580c; }
   </style>
 </head>
 <body class="min-h-screen bg-slate-950 text-slate-100 font-sans flex flex-col antialiased selection:bg-orange-500 selection:text-slate-900">
@@ -463,9 +446,7 @@
       <div class="max-w-7xl mx-auto flex flex-col md:flex-row md:items-center md:justify-between gap-4">
         
         <div class="flex items-center gap-3">
-          <div class="h-10 w-10 rounded-lg bg-orange-500/10 border border-orange-500/30 flex items-center justify-center text-orange-400 font-black shadow-inner">
-            A
-          </div>
+          <div class="h-10 w-10 rounded-lg bg-orange-500/10 border border-orange-500/30 flex items-center justify-center text-orange-400 font-black shadow-inner">A</div>
           <div>
             <div class="flex items-center gap-2">
               <span class="text-xs font-bold tracking-widest text-orange-400 uppercase bg-orange-950/80 px-2 py-0.5 rounded border border-orange-500/20">APACHE TEAM</span>
@@ -475,16 +456,13 @@
           </div>
         </div>
 
-        <!-- Filtros Rápidos + Cargar Iteración -->
         <div class="flex flex-wrap items-center gap-3">
           <div class="flex items-center gap-2 bg-slate-900 border border-slate-800 rounded-lg p-1">
             <button 
               @click="selectedIteracion = 'all'; calculateStats();"
               :class="selectedIteracion === 'all' ? 'bg-orange-500 text-slate-950 font-bold shadow' : 'text-slate-400 hover:text-slate-200'"
               class="px-3 py-1.5 text-xs font-medium rounded-md transition-all"
-            >
-              Todas
-            </button>
+            >Todas</button>
             <template x-for="iter in iteracionData" :key="iter.id">
               <button
                 @click="selectedIteracion = iter.id; calculateStats();"
@@ -495,7 +473,6 @@
             </template>
           </div>
 
-          <!-- BOTÓN CARGAR CSV -->
           <button 
             @click="openModal()"
             class="bg-orange-600 hover:bg-orange-500 text-slate-950 font-extrabold text-xs px-3.5 py-2.5 rounded-lg transition-all shadow-md flex items-center gap-2 border border-orange-400/30 hover:scale-105 active:scale-95"
@@ -559,20 +536,42 @@
     <!-- CONTENIDO PRINCIPAL -->
     <main class="flex-1 max-w-7xl w-full mx-auto p-6 space-y-6">
 
-      <!-- EXPLICATIVO DE PRIVACIDAD -->
-      <div class="p-4 bg-gradient-to-r from-orange-950/40 via-slate-900/40 to-slate-900/30 border border-orange-500/20 rounded-xl flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div class="flex items-start gap-3">
-          <div class="p-2 bg-orange-500/10 rounded-lg text-orange-400 shrink-0 mt-0.5">
-            <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" /></svg>
+      <!-- ========================================== -->
+      <!-- NUEVO DIAGNÓSTICO EJECUTIVO DE SALUD       -->
+      <!-- ========================================== -->
+      <div :class="pulseStatus.bg + ' ' + pulseStatus.border" class="p-4 border rounded-xl flex flex-col md:flex-row md:items-center justify-between gap-4 transition-colors duration-500 shadow-sm relative overflow-hidden group">
+        
+        <!-- Decoration dinámico atrás -->
+        <div class="absolute -right-10 -top-10 w-32 h-32 rounded-full blur-3xl opacity-20 pointer-events-none transition-colors duration-1000" :class="pulseStatus.color.replace('text-', 'bg-')"></div>
+
+        <div class="flex items-start gap-4 z-10">
+          <div :class="pulseStatus.color + ' bg-slate-950/60'" class="p-2.5 rounded-xl shrink-0 mt-0.5 border border-slate-800/60 shadow-inner">
+            <!-- Iconos Dinámicos -->
+            <svg x-show="pulseStatus.icon === 'optimal'" class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+            <svg x-show="pulseStatus.icon === 'warning'" class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
+            <svg x-show="pulseStatus.icon === 'risk'" class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+            <svg x-show="pulseStatus.icon === 'info'" class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
           </div>
           <div>
-            <h4 class="text-sm font-semibold text-orange-300">Entorno de Datos Seguros y Anonimizados</h4>
-            <p class="text-xs text-slate-300 mt-0.5 max-w-3xl leading-relaxed">
-              Este dashboard ha sido configurado para el equipo **Apache** con estrictas reglas de privacidad. **No se almacenan ni se visualizan nombres, correos ni identificadores personales.** El feedback se trata como información colectiva puramente táctica para propiciar mejoras en el proceso de desarrollo y pruebas.
-            </p>
+            <h4 class="text-[13px] font-black uppercase tracking-wide" :class="pulseStatus.color" x-text="pulseStatus.title"></h4>
+            <p class="text-[13px] text-slate-300 mt-1 max-w-4xl leading-relaxed font-medium" x-html="pulseSummary"></p>
+          </div>
+        </div>
+
+        <div class="shrink-0 hidden md:flex z-10 flex-col justify-center border-l border-slate-700/50 pl-5">
+          <div class="bg-slate-950/80 border border-slate-800/80 rounded-lg px-4 py-2 flex flex-col items-center justify-center min-w-[120px] shadow-sm">
+             <span class="text-[10px] text-slate-400 font-black uppercase mb-1 tracking-wider">Diagnóstico IA</span>
+             <div class="flex items-center gap-2">
+               <span class="flex h-2.5 w-2.5 relative">
+                  <span :class="pulseStatus.color.replace('text-', 'bg-')" class="animate-ping absolute inline-flex h-full w-full rounded-full opacity-75"></span>
+                  <span :class="pulseStatus.color.replace('text-', 'bg-')" class="relative inline-flex rounded-full h-2.5 w-2.5"></span>
+                </span>
+                <span class="text-[10px] font-bold" :class="pulseStatus.color" x-text="pulseStatus.icon === 'optimal' ? 'ESTABLE' : (pulseStatus.icon === 'warning' ? 'EN REVISIÓN' : 'CRÍTICO')"></span>
+             </div>
           </div>
         </div>
       </div>
+      <!-- ========================================== -->
 
       <!-- TAB: VISTA GENERAL -->
       <div x-show="activeTab === 'dashboard'" class="space-y-6" x-transition>
@@ -668,7 +667,6 @@
 
                   <!-- Barra Apilada Visual -->
                   <div class="h-6 w-full rounded-lg bg-slate-800/60 overflow-hidden flex shadow-inner border border-slate-700/30">
-                    <!-- Franja Alta -->
                     <template x-if="trend.raw.alta > 0">
                       <div 
                         :style="'width: ' + trend.altaPercent + '%'" 
@@ -677,7 +675,6 @@
                         x-text="trend.altaPercent + '%'"
                       ></div>
                     </template>
-                    <!-- Franja Adecuada -->
                     <template x-if="trend.raw.adecuada > 0">
                       <div 
                         :style="'width: ' + trend.adecuadaPercent + '%'" 
@@ -686,7 +683,6 @@
                         x-text="trend.adecuadaPercent + '%'"
                       ></div>
                     </template>
-                    <!-- Franja Baja -->
                     <template x-if="trend.raw.baja > 0">
                       <div 
                         :style="'width: ' + trend.bajaPercent + '%'" 
@@ -717,7 +713,7 @@
 
           </div>
 
-          <!-- FACTORES DE ENLENTECIMIENTO (TOP DE APACHE) -->
+          <!-- FACTORES DE ENLENTECIMIENTO -->
           <div class="bg-slate-900/60 border border-slate-800/80 rounded-xl p-6 flex flex-col justify-between">
             <div>
               <h3 class="text-base font-bold text-slate-100">Frenos Detectados</h3>
@@ -847,7 +843,7 @@
           </div>
         </div>
 
-        <!-- WIDGET DE ANÁLISIS DE SENTIMIENTO BASADO EN COMENTARIOS (NUEVA MEJORA) -->
+        <!-- WIDGET DE ANÁLISIS DE SENTIMIENTO -->
         <div class="bg-slate-900 border border-slate-800/80 rounded-xl p-5 space-y-4">
           <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
             <div>
@@ -867,10 +863,7 @@
             </div>
           </div>
           
-          <!-- Tarjetas del Sentimiento -->
           <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            
-            <!-- Positivos -->
             <div class="bg-slate-950 border border-slate-800/60 rounded-xl p-3.5 space-y-2 flex flex-col justify-between">
               <div>
                 <div class="flex items-center justify-between">
@@ -890,7 +883,6 @@
               </div>
             </div>
 
-            <!-- Crítico/Desafíos -->
             <div class="bg-slate-950 border border-slate-800/60 rounded-xl p-3.5 space-y-2 flex flex-col justify-between">
               <div>
                 <div class="flex items-center justify-between">
@@ -910,7 +902,6 @@
               </div>
             </div>
 
-            <!-- Neutros -->
             <div class="bg-slate-950 border border-slate-800/60 rounded-xl p-3.5 space-y-2 flex flex-col justify-between">
               <div>
                 <div class="flex items-center justify-between">
@@ -929,35 +920,12 @@
                 <div :style="'width: ' + commentStats.neuPercent + '%'" class="h-full bg-gradient-to-r from-amber-500 to-orange-400 transition-all duration-500"></div>
               </div>
             </div>
-
-          </div>
-
-          <!-- Insight Descriptivo Basado en Análisis -->
-          <div class="p-3 bg-slate-950 rounded-lg border border-slate-800 text-xs text-slate-400 flex items-center gap-2.5">
-            <div class="p-1.5 bg-orange-500/10 rounded-lg text-orange-400 shrink-0">
-              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-            </div>
-            <div>
-              <span>
-                Se excluyeron <strong class="text-slate-300" x-text="commentStats.none"></strong> reportes que no ingresaron comentarios válidos o usaron respuestas estándar de omisión (ej. "NA", "Ninguno").
-                <template x-if="commentStats.totalWithComments === 0">
-                  <span>No hay comentarios suficientes en los registros activos para generar un diagnóstico cualitativo.</span>
-                </template>
-                <template x-if="commentStats.negative > commentStats.positive">
-                  <span class="text-rose-300">El equipo Apache expresa mayor preocupación por el orden técnico, historias de usuario poco claras y fricciones con el ambiente productivo. Se recomienda mitigar el "afán" en etapas de pruebas tempranas.</span>
-                </template>
-                <template x-if="commentStats.positive >= commentStats.negative && commentStats.totalWithComments > 0">
-                  <span class="text-emerald-300">El equipo valora positivamente la aceleración del ritmo en los entregables de IA y el modelo de datos, considerándolo adecuado y estable a pesar de los cambios de alcance.</span>
-                </template>
-              </span>
-            </div>
           </div>
         </div>
 
         <!-- GRILLA DE RESPUESTAS -->
         <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
           
-          <!-- TABLA -->
           <div class="bg-slate-900/60 border border-slate-800/80 rounded-xl overflow-hidden lg:col-span-2">
             <div class="border-b border-slate-800/80 px-4 py-3 bg-slate-900/40 flex items-center justify-between">
               <h3 class="text-xs font-bold text-slate-300 uppercase tracking-wider">Historial de Reportes de Apache</h3>
@@ -979,7 +947,6 @@
                     <div class="flex items-center gap-2">
                       <span class="text-xs font-bold text-slate-200" x-text="r.anonymousName"></span>
                       
-                      <!-- Badge Emocional del Comentario -->
                       <template x-if="r.sentiment === 'positive'">
                         <span class="text-[9px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-1.5 py-0.5 rounded font-bold uppercase">Favorable</span>
                       </template>
@@ -996,10 +963,7 @@
                     
                     <div class="flex flex-wrap gap-1.5 pt-1">
                       <template x-for="f in r.factors" :key="f">
-                        <span 
-                          class="text-[9px] bg-slate-800/80 text-slate-400 px-1.5 py-0.5 rounded border border-slate-700/50"
-                          x-text="f"
-                        ></span>
+                        <span class="text-[9px] bg-slate-800/80 text-slate-400 px-1.5 py-0.5 rounded border border-slate-700/50" x-text="f"></span>
                       </template>
                     </div>
 
@@ -1025,17 +989,13 @@
             </div>
           </div>
 
-          <!-- PANEL DETALLE -->
           <div class="bg-slate-900 border border-slate-800/80 rounded-xl p-5 h-fit sticky top-28">
             <div x-show="selectedResponse !== null" class="space-y-4">
               <div class="flex justify-between items-start">
                 <div>
-                  <span 
-                    class="text-[10px] font-bold text-orange-400 uppercase tracking-widest block bg-orange-950/50 border border-orange-500/20 px-2 py-0.5 rounded w-fit"
-                    x-text="selectedResponse ? selectedResponse.sprintName : ''"
-                  ></span>
+                  <span class="text-[10px] font-bold text-orange-400 uppercase tracking-widest block bg-orange-950/50 border border-orange-500/20 px-2 py-0.5 rounded w-fit" x-text="selectedResponse ? selectedResponse.sprintName : ''"></span>
                   <h3 class="text-sm font-bold text-slate-100 mt-2" x-text="selectedResponse ? selectedResponse.anonymousName : ''"></h3>
-                  <p class="text-xs text-slate-500 italic">Identidad de origen anonimizada de forma segura</p>
+                  <p class="text-xs text-slate-500 italic">Identidad anonimizada de forma segura</p>
                 </div>
                 
                 <span 
@@ -1067,7 +1027,7 @@
                       <p class="text-xs text-slate-300 leading-relaxed italic" x-text="'&ldquo;' + selectedResponse.observation + '&rdquo;'"></p>
                     </template>
                     <template x-if="selectedResponse && (!selectedResponse.observation || selectedResponse.observation === 'NA' || selectedResponse.observation === 'Na')">
-                      <p class="text-xs text-slate-600 italic">No se registraron observaciones o detalles cualitativos en esta respuesta.</p>
+                      <p class="text-xs text-slate-600 italic">No se registraron observaciones cualitativas.</p>
                     </template>
                   </div>
                 </div>
@@ -1076,7 +1036,7 @@
 
             <div x-show="selectedResponse === null" class="py-24 text-center text-slate-500 text-xs flex flex-col items-center justify-center gap-3">
               <svg class="w-8 h-8 text-slate-600 animate-bounce" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" /></svg>
-              <span>Haz clic sobre un reporte anónimo en la lista de la izquierda para desplegar su análisis cualitativo completo.</span>
+              <span>Haz clic sobre un reporte anónimo en la lista para desplegar su análisis cualitativo.</span>
             </div>
           </div>
 
@@ -1089,20 +1049,18 @@
         
         <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
           
-          <!-- ANÁLISIS DE FACTORES -->
           <div class="bg-slate-900/60 border border-slate-800/80 rounded-xl p-6">
             <h3 class="text-base font-bold text-slate-100 mb-2">Diagnóstico de Impedimentos para Apache</h3>
             <p class="text-xs text-slate-400 mb-6">Detalle consolidado de los factores que obstaculizan la agilidad en los proyectos de I+D e IA.</p>
 
             <div class="space-y-4">
-              
               <div class="p-4 bg-slate-900 border border-slate-800 rounded-xl space-y-2">
                 <div class="flex items-center justify-between">
                   <span class="text-xs font-bold text-slate-200">Cambios de Alcance</span>
                   <span class="text-xs text-orange-400 font-bold">Frecuencia Crítica</span>
                 </div>
                 <p class="text-xs text-slate-400 leading-relaxed">
-                  Dado que Apache realiza constante investigación en nuevos paradigmas (como IA y Ciencia de Datos), se detecta un ingreso elevado de HU no planificadas o modificaciones de última hora para garantizar estabilidad en ambientes productivos.
+                  Dado que Apache realiza constante investigación en nuevos paradigmas (como IA y Ciencia de Datos), se detecta un ingreso elevado de HU no planificadas o modificaciones de última hora para garantizar estabilidad.
                 </p>
               </div>
 
@@ -1112,7 +1070,7 @@
                   <span class="text-xs text-orange-400 font-bold">Alto</span>
                 </div>
                 <p class="text-xs text-slate-400 leading-relaxed">
-                  Las HU en ambientes experimentales suelen requerir un orden metodológico excepcional. Los cambios bruscos atentan contra el ciclo de "prueba y error", restando libertad en las fases iniciales.
+                  Las HU en ambientes experimentales suelen requerir un orden metodológico excepcional. Los cambios bruscos atentan contra el ciclo de "prueba y error", restando libertad.
                 </p>
               </div>
 
@@ -1122,14 +1080,12 @@
                   <span class="text-xs text-amber-500 font-bold">Moderado</span>
                 </div>
                 <p class="text-xs text-slate-400 leading-relaxed">
-                  Se reporta fricción al intentar vincular etapas tempranas a flujos directamente productivos. Probar en cargas productivas prematuramente disminuye la agilidad técnica de mitigación de bugs.
+                  Se reporta fricción al intentar vincular etapas tempranas a flujos directamente productivos. Probar en cargas productivas prematuramente disminuye la agilidad.
                 </p>
               </div>
-
             </div>
           </div>
 
-          <!-- PROPUESTAS DE ESTABILIZACIÓN -->
           <div class="bg-slate-900/60 border border-slate-800/80 rounded-xl p-6 flex flex-col justify-between">
             <div>
               <h3 class="text-base font-bold text-slate-100 mb-2">Recomendaciones para I+D Apache</h3>
@@ -1141,7 +1097,7 @@
                   <div>
                     <h4 class="text-xs font-bold text-slate-200">Delimitar Ambientes de Sandbox</h4>
                     <p class="text-xs text-slate-400 mt-0.5">
-                      Evitar la vinculación directa de desarrollos tempranos de IA/Investigación a flujos productivos. Garantizar un ambiente aislado de pruebas con cargas simuladas para mayor libertad de iteración.
+                      Evitar la vinculación directa de desarrollos tempranos de IA a flujos productivos. Garantizar un ambiente aislado de pruebas.
                     </p>
                   </div>
                 </div>
@@ -1151,7 +1107,7 @@
                   <div>
                     <h4 class="text-xs font-bold text-slate-200">Criterios de DoR Flexibles pero Estables</h4>
                     <p class="text-xs text-slate-400 mt-0.5">
-                      Establecer alcances realistas y acordados para cada iteración en el equipo Apache, limitando la adición de servicios no planificados a menos que sea rigurosamente necesario para el proyecto de IA.
+                      Establecer alcances realistas y acordados para cada iteración, limitando la adición de servicios no planificados.
                     </p>
                   </div>
                 </div>
@@ -1161,7 +1117,7 @@
                   <div>
                     <h4 class="text-xs font-bold text-slate-200">Preservación del Conocimiento de IA</h4>
                     <p class="text-xs text-slate-400 mt-0.5">
-                      Documentar metodológicamente las lecciones de los modelos de datos y bugs de validadores de HU para acelerar la curva de aprendizaje de futuros miembros del equipo.
+                      Documentar metodológicamente las lecciones de los modelos de datos y bugs para acelerar la curva de aprendizaje.
                     </p>
                   </div>
                 </div>
@@ -1181,7 +1137,6 @@
                 Volver al Dashboard
               </button>
             </div>
-
           </div>
 
         </div>
@@ -1190,7 +1145,7 @@
 
     </main>
 
-    <!-- MODAL DE CARGA DE ARCHIVO DE SPRINT -->
+    <!-- MODAL DE CARGA -->
     <div 
       x-show="showUploadModal" 
       class="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm"
@@ -1201,50 +1156,34 @@
         @click.away="showUploadModal = false" 
         class="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-lg overflow-hidden shadow-2xl"
       >
-        <!-- Cabecera del Modal -->
         <div class="border-b border-slate-800/80 px-6 py-4 bg-slate-950/40 flex items-center justify-between">
           <div class="flex items-center gap-2">
             <div class="h-2 w-2 rounded-full bg-orange-400 animate-pulse"></div>
-            <h3 class="text-sm font-bold text-slate-200 uppercase tracking-wider">Cargar Iteración (Anonimizado)</h3>
+            <h3 class="text-sm font-bold text-slate-200 uppercase tracking-wider">Cargar Iteración</h3>
           </div>
           <button @click="showUploadModal = false" class="text-slate-400 hover:text-slate-200">
             <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
           </button>
         </div>
 
-        <!-- Cuerpo del Modal -->
         <div class="p-6 space-y-4">
-          
           <div class="bg-amber-950/30 border border-amber-500/20 p-3 rounded-lg text-xs text-amber-300 flex gap-2 items-start">
             <svg class="w-5 h-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-            <span>Al cargar el CSV, el sistema procesará los datos operativos pero **eliminará de inmediato** los nombres y correos de las personas para mantener el anonimato absoluto.</span>
+            <span>Los datos cargados se anonimizan automáticamente omitiendo nombres e información sensible.</span>
           </div>
 
-          <!-- Nombre de la iteración -->
           <div>
             <label class="text-xs font-bold text-slate-400 block mb-1">Identificador de la Iteración:</label>
-            <input 
-              type="text" 
-              x-model="newIteracionName" 
-              placeholder="Ej. Iteración 39" 
-              class="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-orange-500"
-            />
+            <input type="text" x-model="newIteracionName" placeholder="Ej. Iteración 39" class="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-orange-500" />
           </div>
 
-          <!-- Periodo -->
           <div>
             <label class="text-xs font-bold text-slate-400 block mb-1">Periodo:</label>
-            <input 
-              type="text" 
-              x-model="newIteracionPeriod" 
-              placeholder="Ej. Mayo 2026 (Fin)" 
-              class="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-orange-500"
-            />
+            <input type="text" x-model="newIteracionPeriod" placeholder="Ej. Mayo 2026 (Fin)" class="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-orange-500" />
           </div>
 
-          <!-- Drag & Drop -->
           <div>
-            <label class="text-xs font-bold text-slate-400 block mb-1">Archivo de Respuestas (CSV de Excel):</label>
+            <label class="text-xs font-bold text-slate-400 block mb-1">Archivo CSV (Respuestas):</label>
             <div 
               @dragover.prevent="dragOver = true"
               @dragleave.prevent="dragOver = false"
@@ -1252,12 +1191,7 @@
               :class="dragOver ? 'border-orange-400 bg-orange-950/10' : 'border-slate-800 bg-slate-950/40 hover:border-slate-700'"
               class="border-2 border-dashed rounded-xl p-6 text-center transition-all relative cursor-pointer"
             >
-              <input 
-                type="file" 
-                accept=".csv,.txt" 
-                @change="handleFileSelect($event)" 
-                class="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-              />
+              <input type="file" accept=".csv,.txt" @change="handleFileSelect($event)" class="absolute inset-0 w-full h-full opacity-0 cursor-pointer" />
               
               <div class="space-y-2 flex flex-col items-center">
                 <svg class="w-10 h-10 text-orange-400/80" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M9 13h6m-3-3v6m-9 1V4a2 2 0 012-2h6l2 2h6a2 2 0 012 2v12a2 2 0 01-2 2H5a2 2 0 01-2-2z" /></svg>
@@ -1268,9 +1202,8 @@
             </div>
           </div>
 
-          <!-- Feedback de Selección -->
           <template x-if="uploadedFileName">
-            <div class="p-3 bg-emerald-950/20 border border-emerald-500/20 rounded-lg flex items-center justify-between text-xs animate-fade-in">
+            <div class="p-3 bg-emerald-950/20 border border-emerald-500/20 rounded-lg flex items-center justify-between text-xs">
               <div class="flex items-center gap-2 text-emerald-300">
                 <svg class="w-4 h-4 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
                 <span>Archivo seleccionado: <strong x-text="uploadedFileName"></strong></span>
@@ -1279,27 +1212,15 @@
             </div>
           </template>
 
-          <!-- Error -->
           <template x-if="uploadError">
-            <div class="p-3 bg-rose-950/40 border border-rose-500/20 text-rose-300 text-xs rounded-lg font-medium animate-fade-in" x-text="uploadError"></div>
+            <div class="p-3 bg-rose-950/40 border border-rose-500/20 text-rose-300 text-xs rounded-lg font-medium" x-text="uploadError"></div>
           </template>
 
         </div>
 
-        <!-- Botones -->
         <div class="border-t border-slate-800/80 px-6 py-4 bg-slate-950/40 flex justify-end gap-3">
-          <button 
-            @click="showUploadModal = false" 
-            class="px-4 py-2 text-xs font-semibold text-slate-400 hover:text-slate-200"
-          >
-            Cancelar
-          </button>
-          <button 
-            @click="saveIteracion()" 
-            class="px-5 py-2 text-xs font-bold bg-orange-600 hover:bg-orange-500 text-slate-950 rounded-lg transition-colors flex items-center gap-1.5"
-          >
-            Procesar de forma Anónima
-          </button>
+          <button @click="showUploadModal = false" class="px-4 py-2 text-xs font-semibold text-slate-400 hover:text-slate-200">Cancelar</button>
+          <button @click="saveIteracion()" class="px-5 py-2 text-xs font-bold bg-orange-600 hover:bg-orange-500 text-slate-950 rounded-lg transition-colors flex items-center gap-1.5">Procesar Anónimo</button>
         </div>
 
       </div>
@@ -1308,13 +1229,9 @@
     <!-- FOOTER -->
     <footer class="border-t border-slate-900 bg-slate-950 py-6 px-6 mt-auto">
       <div class="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-slate-500">
-        <div>
-          <span>© 2026 Apache Velocity Pulse Tracker - Entorno Privado de I+D.</span>
-        </div>
+        <div><span>© 2026 Apache Velocity Pulse Tracker - Entorno Privado de I+D.</span></div>
         <div class="flex gap-4">
-          <span class="hover:text-slate-400 cursor-pointer">Seguridad</span>
-          <span>•</span>
-          <span class="hover:text-slate-400 cursor-pointer">Investigación Ágiles</span>
+          <span class="hover:text-slate-400 cursor-pointer">Seguridad</span><span>•</span><span class="hover:text-slate-400 cursor-pointer">Investigación Ágil</span>
         </div>
       </div>
     </footer>
